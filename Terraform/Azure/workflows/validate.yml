@@ -1,0 +1,112 @@
+name: Terraform Validate (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment name'
+        required: true
+        type: string
+      terraform-version:
+        description: 'Terraform version'
+        required: false
+        type: string
+        default: '1.7.0'
+      working-directory:
+        description: 'Working directory'
+        required: false
+        type: string
+        default: './terraform'
+      backend-resource-group:
+        description: 'Backend resource group'
+        required: true
+        type: string
+      backend-storage-account:
+        description: 'Backend storage account'
+        required: true
+        type: string
+      backend-container:
+        description: 'Backend container'
+        required: true
+        type: string
+      backend-key:
+        description: 'Backend key'
+        required: true
+        type: string
+      template-repo:
+        description: 'Template repository (org/repo)'
+        required: false
+        type: string
+        default: ''
+      template-ref:
+        description: 'Template ref (branch/tag)'
+        required: false
+        type: string
+        default: 'main'
+    secrets:
+      azure-client-id:
+        required: true
+      azure-tenant-id:
+        required: true
+      azure-subscription-id:
+        required: true
+
+jobs:
+  setup:
+    name: Download Templates
+    runs-on: ubuntu-latest
+    if: inputs.template-repo != ''
+    steps:
+      - name: Checkout Templates
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.template-repo }}
+          ref: ${{ inputs.template-ref }}
+          path: .pipeline-templates
+
+      - name: Upload Templates
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-templates-${{ github.run_id }}
+          path: .pipeline-templates/Terraform/Azure/actions
+          retention-days: 1
+
+  validate:
+    name: Terraform Validate
+    needs: [setup]
+    if: always() && (needs.setup.result == 'success' || needs.setup.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Templates
+        if: inputs.template-repo != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: pipeline-templates-${{ github.run_id }}
+          path: .github/actions/terraform/azure
+
+      - name: Setup Terraform & Azure
+        uses: ./.github/actions/terraform/azure/setup
+        with:
+          terraform-version: ${{ inputs.terraform-version }}
+          azure-client-id: ${{ secrets.azure-client-id }}
+          azure-tenant-id: ${{ secrets.azure-tenant-id }}
+          azure-subscription-id: ${{ secrets.azure-subscription-id }}
+
+      - name: Terraform Init
+        uses: ./.github/actions/terraform/azure/init
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          backend-resource-group: ${{ inputs.backend-resource-group }}
+          backend-storage-account: ${{ inputs.backend-storage-account }}
+          backend-container: ${{ inputs.backend-container }}
+          backend-key: ${{ inputs.backend-key }}
+
+      - name: Terraform Validate
+        uses: ./.github/actions/terraform/azure/validate
+        with:
+          working-directory: ${{ inputs.working-directory }}

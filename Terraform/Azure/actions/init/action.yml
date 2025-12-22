@@ -1,0 +1,32 @@
+name: 'Terraform Init'
+description: 'Initialize Terraform with Azure backend'
+inputs:
+  working-directory:
+    description: 'Working directory for Terraform'
+    required: false
+    default: './terraform'
+  backend-resource-group:
+    description: 'Backend resource group name'
+    required: true
+  backend-storage-account:
+    description: 'Backend storage account name'
+    required: true
+  backend-container:
+    description: 'Backend container name'
+    required: true
+  backend-key:
+    description: 'Backend state file key'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Terraform Init
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        terraform init \
+          -backend-config="resource_group_name=${{ inputs.backend-resource-group }}" \
+          -backend-config="storage_account_name=${{ inputs.backend-storage-account }}" \
+          -backend-config="container_name=${{ inputs.backend-container }}" \
+          -backend-config="key=${{ inputs.backend-key }}"

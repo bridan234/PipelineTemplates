@@ -1,0 +1,113 @@
+name: Terraform Plan (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment name'
+        required: true
+        type: string
+      var-file:
+        description: 'Terraform var file'
+        required: true
+        type: string
+      destroy:
+        description: 'Create destroy plan'
+        required: false
+        type: boolean
+        default: false
+      terraform-version:
+        description: 'Terraform version'
+        required: false
+        type: string
+        default: '1.7.0'
+      working-directory:
+        description: 'Working directory'
+        required: false
+        type: string
+        default: './terraform'
+      backend-resource-group:
+        description: 'Backend resource group'
+        required: true
+        type: string
+      backend-storage-account:
+        description: 'Backend storage account'
+        required: true
+        type: string
+      backend-container:
+        description: 'Backend container'
+        required: true
+        type: string
+      backend-key:
+        description: 'Backend key'
+        required: true
+        type: string
+    secrets:
+      azure-client-id:
+        required: true
+      azure-tenant-id:
+        required: true
+      azure-subscription-id:
+        required: true
+      # Pass all other secrets from caller using 'secrets: inherit' in caller
+    outputs:
+      exitcode:
+        description: 'Plan exit code'
+        value: ${{ jobs.plan.outputs.exitcode }}
+
+jobs:
+  plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    outputs:
+      exitcode: ${{ steps.plan.outputs.exitcode }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Templates
+        if: inputs.template-repo != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: pipeline-templates-${{ github.run_id }}
+          path: .github/actions/terraform/azure
+
+      - name: Setup Terraform & Azure
+        uses: ./.github/actions/terraform/azure/setup
+        with:
+          terraform-version: ${{ inputs.terraform-version }}
+          azure-client-id: ${{ secrets.azure-client-id }}
+          azure-tenant-id: ${{ secrets.azure-tenant-id }}
+          azure-subscription-id: ${{ secrets.azure-subscription-id }}
+
+      - name: Terraform Init
+        uses: ./.github/actions/terraform/azure/init
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          backend-resource-group: ${{ inputs.backend-resource-group }}
+          backend-storage-account: ${{ inputs.backend-storage-account }}
+          backend-container: ${{ inputs.backend-container }}
+          backend-key: ${{ inputs.backend-key }}
+
+      - name: Terraform Plan
+        id: plan
+        uses: ./.github/actions/terraform/azure/plan
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          var-file: ${{ inputs.var-file }}
+          destroy: ${{ inputs.destroy }}
+        env:
+          # All secrets from caller are available here via 'secrets: inherit'
+          # Set them as environment variables for Terraform
+          TF_VAR_example_secret: ${{ secrets.EXAMPLE_SECRET }}
+          TF_VAR_another_secret: ${{ secrets.ANOTHER_SECRET }}
+          # Add more TF_VAR_* as needed
+
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: ${{ inputs.working-directory }}/tfplan
+          retention-days: 5

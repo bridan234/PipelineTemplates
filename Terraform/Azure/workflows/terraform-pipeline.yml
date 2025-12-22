@@ -1,0 +1,105 @@
+name: Terraform Pipeline
+
+on:
+  pull_request:
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform.yml'
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        default: 'plan'
+        options:
+          - validate
+          - plan
+          - apply
+          - destroy
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+  actions: write
+
+jobs:
+  # Step 1: Validate
+  validate:
+    name: Validate
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/terraform/azure/validate.yml
+    with:
+      environment: ${{ github.event.inputs.environment || 'staging' }}
+      terraform-version: '1.7.0'
+      working-directory: './terraform'
+      backend-resource-group: ${{ vars.BACKEND_RESOURCE_GROUP_NAME }}
+      backend-storage-account: ${{ vars.BACKEND_STORAGE_ACCOUNT_NAME }}
+      backend-container: ${{ vars.BACKEND_CONTAINER_NAME }}
+      backend-key: ${{ vars.BACKEND_KEY }}
+    secrets: inherit  # Pass all secrets from parent workflow
+
+  # Step 2: Plan
+  plan:
+    name: Plan
+    needs: validate
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event.inputs.action == 'plan' || github.event.inputs.action == 'apply' || github.event.inputs.action == 'destroy'
+    uses: ./.github/workflows/terraform/azure/plan.yml
+    with:
+      environment: ${{ github.event.inputs.environment || 'staging' }}
+      var-file: ${{ github.event.inputs.environment || 'staging' }}.tfvars
+      destroy: ${{ github.event.inputs.action == 'destroy' }}
+      terraform-version: '1.7.0'
+      working-directory: './terraform'
+      backend-resource-group: ${{ vars.BACKEND_RESOURCE_GROUP_NAME }}
+      backend-storage-account: ${{ vars.BACKEND_STORAGE_ACCOUNT_NAME }}
+      backend-container: ${{ vars.BACKEND_CONTAINER_NAME }}
+      backend-key: ${{ vars.BACKEND_KEY }}
+    secrets: inherit  # Pass all secrets from parent workflow
+
+  # Step 3: Approval (manual gate)
+  approve:
+    name: Approve
+    needs: plan
+    if: github.event_name != 'pull_request' && needs.plan.outputs.exitcode == '2' && (github.event.inputs.action == 'apply' || github.event.inputs.action == 'destroy')
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Approval Gate
+        run: |
+          if [ "${{ github.event.inputs.action }}" == "destroy" ]; then
+            echo "⚠️ Approved for DESTRUCTION"
+          else
+            echo "✅ Approved for deployment"
+          fi
+
+  # Step 4: Apply/Destroy
+  apply:
+    name: Apply
+    needs: [plan, approve]
+    if: github.event_name != 'pull_request' && needs.plan.outputs.exitcode == '2' && (github.event.inputs.action == 'apply' || github.event.inputs.action == 'destroy')
+    uses: ./.github/workflows/terraform/azure/apply.yml
+    with:
+      environment: ${{ github.event.inputs.environment }}
+      terraform-version: '1.7.0'
+      working-directory: './terraform'
+      backend-resource-group: ${{ vars.BACKEND_RESOURCE_GROUP_NAME }}
+      backend-storage-account: ${{ vars.BACKEND_STORAGE_ACCOUNT_NAME }}
+      backend-container: ${{ vars.BACKEND_CONTAINER_NAME }}
+      backend-key: ${{ vars.BACKEND_KEY }}
+    secrets: inherit  # Pass all secrets from parent workflow
