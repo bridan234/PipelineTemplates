@@ -1,0 +1,25 @@
+name: 'Terraform Validate'
+description: 'Run Terraform format check and validation'
+inputs:
+  working-directory:
+    description: 'Working directory for Terraform'
+    required: false
+    default: './terraform'
+  fail-on-format:
+    description: 'Fail if format check fails'
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Terraform Format Check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: terraform fmt -check
+      continue-on-error: ${{ inputs.fail-on-format != 'true' }}
+
+    - name: Terraform Validate
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: terraform validate

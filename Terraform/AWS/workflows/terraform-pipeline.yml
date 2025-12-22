@@ -69,39 +69,20 @@ permissions:
   actions: write
 
 jobs:
-  # Step 0: Setup - Download templates once for all workflows
-  setup:
-    name: Download Templates
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Templates
-        uses: actions/checkout@v4
-        with:
-          repository: 'your-org/pipeline-templates'
-          ref: 'main'
-          path: .pipeline-templates
-
-      - name: Upload Templates
-        uses: actions/upload-artifact@v4
-        with:
-          name: pipeline-templates-${{ github.run_id }}
-          path: .pipeline-templates/Terraform/Azure/actions
-          retention-days: 1
-
   # Step 1: Validate
   validate:
     name: Validate
-    needs: [setup]
     if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    uses: ./.github/workflows/terraform/azure/validate.yml
+    uses: ./.github/workflows/terraform/aws/validate.yml
     with:
       environment: ${{ github.event.inputs.environment || 'staging' }}
       terraform-version: '1.7.0'
       working-directory: './terraform'
-      backend-resource-group: ${{ vars.BACKEND_RESOURCE_GROUP_NAME }}
-      backend-storage-account: ${{ vars.BACKEND_STORAGE_ACCOUNT_NAME }}
-      backend-container: ${{ vars.BACKEND_CONTAINER_NAME }}
+      aws-region: ${{ vars.AWS_REGION }}
+      backend-bucket: ${{ vars.BACKEND_BUCKET }}
       backend-key: ${{ vars.BACKEND_KEY }}
+      backend-region: ${{ vars.BACKEND_REGION }}
+      backend-dynamodb-table: ${{ vars.BACKEND_DYNAMODB_TABLE }}
       pre-step: ${{ github.event.inputs.pre-validate-step || '' }}
       post-step: ${{ github.event.inputs.post-validate-step || '' }}
     secrets: inherit  # Pass all secrets from parent workflow
@@ -111,17 +92,18 @@ jobs:
     name: Plan
     needs: validate
     if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event.inputs.action == 'plan' || github.event.inputs.action == 'apply' || github.event.inputs.action == 'destroy'
-    uses: ./.github/workflows/terraform/azure/plan.yml
+    uses: ./.github/workflows/terraform/aws/plan.yml
     with:
       environment: ${{ github.event.inputs.environment || 'staging' }}
       var-file: ${{ github.event.inputs.environment || 'staging' }}.tfvars
       destroy: ${{ github.event.inputs.action == 'destroy' }}
       terraform-version: '1.7.0'
       working-directory: './terraform'
-      backend-resource-group: ${{ vars.BACKEND_RESOURCE_GROUP_NAME }}
-      backend-storage-account: ${{ vars.BACKEND_STORAGE_ACCOUNT_NAME }}
-      backend-container: ${{ vars.BACKEND_CONTAINER_NAME }}
+      aws-region: ${{ vars.AWS_REGION }}
+      backend-bucket: ${{ vars.BACKEND_BUCKET }}
       backend-key: ${{ vars.BACKEND_KEY }}
+      backend-region: ${{ vars.BACKEND_REGION }}
+      backend-dynamodb-table: ${{ vars.BACKEND_DYNAMODB_TABLE }}
       pre-step: ${{ github.event.inputs.pre-plan-step || '' }}
       post-step: ${{ github.event.inputs.post-plan-step || '' }}
     secrets: inherit  # Pass all secrets from parent workflow
@@ -147,15 +129,16 @@ jobs:
     name: Apply
     needs: [plan, approve]
     if: github.event_name != 'pull_request' && needs.plan.outputs.exitcode == '2' && (github.event.inputs.action == 'apply' || github.event.inputs.action == 'destroy')
-    uses: ./.github/workflows/terraform/azure/apply.yml
+    uses: ./.github/workflows/terraform/aws/apply.yml
     with:
       environment: ${{ github.event.inputs.environment }}
       terraform-version: '1.7.0'
       working-directory: './terraform'
-      backend-resource-group: ${{ vars.BACKEND_RESOURCE_GROUP_NAME }}
-      backend-storage-account: ${{ vars.BACKEND_STORAGE_ACCOUNT_NAME }}
-      backend-container: ${{ vars.BACKEND_CONTAINER_NAME }}
+      aws-region: ${{ vars.AWS_REGION }}
+      backend-bucket: ${{ vars.BACKEND_BUCKET }}
       backend-key: ${{ vars.BACKEND_KEY }}
+      backend-region: ${{ vars.BACKEND_REGION }}
+      backend-dynamodb-table: ${{ vars.BACKEND_DYNAMODB_TABLE }}
       pre-step: ${{ github.event.inputs.pre-apply-step || '' }}
       post-step: ${{ github.event.inputs.post-apply-step || '' }}
     secrets: inherit  # Pass all secrets from parent workflow

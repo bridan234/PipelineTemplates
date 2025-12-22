@@ -17,22 +17,28 @@ on:
         required: false
         type: string
         default: './terraform'
-      backend-resource-group:
-        description: 'Backend resource group'
+      aws-region:
+        description: 'AWS region'
         required: true
         type: string
-      backend-storage-account:
-        description: 'Backend storage account'
-        required: true
-        type: string
-      backend-container:
-        description: 'Backend container'
+      backend-bucket:
+        description: 'S3 bucket for state'
         required: true
         type: string
       backend-key:
-        description: 'Backend key'
+        description: 'S3 key for state file'
         required: true
         type: string
+      backend-region:
+        description: 'AWS region for S3 backend'
+        required: false
+        type: string
+        default: ''
+      backend-dynamodb-table:
+        description: 'DynamoDB table for state locking'
+        required: false
+        type: string
+        default: ''
       pre-step:
         description: 'Custom script to run before apply'
         required: false
@@ -44,12 +50,15 @@ on:
         type: string
         default: ''
     secrets:
-      azure-client-id:
-        required: true
-      azure-tenant-id:
-        required: true
-      azure-subscription-id:
-        required: true
+      aws-role-arn:
+        description: 'AWS IAM Role ARN for OIDC authentication'
+        required: false
+      aws-access-key-id:
+        description: 'AWS Access Key ID (alternative to OIDC)'
+        required: false
+      aws-secret-access-key:
+        description: 'AWS Secret Access Key (alternative to OIDC)'
+        required: false
       # Pass all other secrets from caller using 'secrets: inherit' in caller
 
 jobs:
@@ -57,7 +66,7 @@ jobs:
     name: Terraform Apply
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -66,20 +75,21 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: pipeline-templates-${{ github.run_id }}
-          path: .github/actions/terraform/azure
+          path: .github/actions/terraform/aws
 
       - name: Pre-Apply Step
         if: inputs.pre-step != ''
         shell: bash
         run: ${{ inputs.pre-step }}
 
-      - name: Setup Terraform & Azure
-        uses: ./.github/actions/terraform/azure/setup
+      - name: Setup Terraform & AWS
+        uses: ./.github/actions/terraform/aws/setup
         with:
           terraform-version: ${{ inputs.terraform-version }}
-          azure-client-id: ${{ secrets.azure-client-id }}
-          azure-tenant-id: ${{ secrets.azure-tenant-id }}
-          azure-subscription-id: ${{ secrets.azure-subscription-id }}
+          aws-region: ${{ inputs.aws-region }}
+          aws-role-arn: ${{ secrets.aws-role-arn }}
+          aws-access-key-id: ${{ secrets.aws-access-key-id }}
+          aws-secret-access-key: ${{ secrets.aws-secret-access-key }}
 
       - name: Download Plan
         uses: actions/download-artifact@v4
@@ -88,16 +98,16 @@ jobs:
           path: ${{ inputs.working-directory }}
 
       - name: Terraform Init
-        uses: ./.github/actions/terraform/azure/init
+        uses: ./.github/actions/terraform/aws/init
         with:
           working-directory: ${{ inputs.working-directory }}
-          backend-resource-group: ${{ inputs.backend-resource-group }}
-          backend-storage-account: ${{ inputs.backend-storage-account }}
-          backend-container: ${{ inputs.backend-container }}
+          backend-bucket: ${{ inputs.backend-bucket }}
           backend-key: ${{ inputs.backend-key }}
+          backend-region: ${{ inputs.backend-region || inputs.aws-region }}
+          backend-dynamodb-table: ${{ inputs.backend-dynamodb-table }}
 
       - name: Terraform Apply
-        uses: ./.github/actions/terraform/azure/apply
+        uses: ./.github/actions/terraform/aws/apply
         with:
           working-directory: ${{ inputs.working-directory }}
         env:

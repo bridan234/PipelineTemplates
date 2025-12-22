@@ -1,0 +1,42 @@
+name: 'Terraform Init'
+description: 'Initialize Terraform with AWS S3 backend'
+inputs:
+  working-directory:
+    description: 'Working directory for Terraform'
+    required: false
+    default: './terraform'
+  backend-bucket:
+    description: 'S3 bucket name for state storage'
+    required: true
+  backend-key:
+    description: 'S3 key (path) for state file'
+    required: true
+  backend-region:
+    description: 'AWS region for S3 backend'
+    required: true
+  backend-dynamodb-table:
+    description: 'DynamoDB table name for state locking'
+    required: false
+    default: ''
+  backend-encrypt:
+    description: 'Enable server-side encryption'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Terraform Init
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        INIT_ARGS="-backend-config=bucket=${{ inputs.backend-bucket }}"
+        INIT_ARGS="$INIT_ARGS -backend-config=key=${{ inputs.backend-key }}"
+        INIT_ARGS="$INIT_ARGS -backend-config=region=${{ inputs.backend-region }}"
+        INIT_ARGS="$INIT_ARGS -backend-config=encrypt=${{ inputs.backend-encrypt }}"
+
+        if [ -n "${{ inputs.backend-dynamodb-table }}" ]; then
+          INIT_ARGS="$INIT_ARGS -backend-config=dynamodb_table=${{ inputs.backend-dynamodb-table }}"
+        fi
+
+        terraform init $INIT_ARGS

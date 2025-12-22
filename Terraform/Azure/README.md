@@ -78,6 +78,9 @@ jobs:
       backend-key: ${{ vars.BACKEND_KEY }}
       template-repo: 'your-org/pipeline-templates'  # ← Template repo to download actions from
       template-ref: 'main'                           # ← Use 'main' or specific tag like 'v1.0.0'
+      # Optional: Add custom pre/post steps
+      # pre-step: 'echo "Starting validation..."'
+      # post-step: 'echo "Validation complete!"'
     secrets: inherit
 
   plan:
@@ -98,6 +101,9 @@ jobs:
       backend-key: ${{ vars.BACKEND_KEY }}
       template-repo: 'your-org/pipeline-templates'
       template-ref: 'main'
+      # Optional: Add custom pre/post steps
+      # pre-step: 'echo "Starting plan..."'
+      # post-step: 'echo "Plan complete!"'
     secrets: inherit
 
   approve:
@@ -125,6 +131,9 @@ jobs:
       backend-key: ${{ vars.BACKEND_KEY }}
       template-repo: 'your-org/pipeline-templates'
       template-ref: 'main'
+      # Optional: Add custom pre/post steps
+      # pre-step: 'echo "Starting apply..."'
+      # post-step: 'echo "Apply complete! Running health checks..."'
     secrets: inherit
 ```
 
@@ -273,6 +282,286 @@ Add the **exact same** `env:` block to the `Terraform Apply` step:
     TF_VAR_postgres_connection_string: ${{ secrets.POSTGRES_CONNECTION_STRING }}
     # ... rest of your secrets
 ```
+
+## Pre and Post Steps
+
+Each workflow supports optional `pre-step` and `post-step` inputs for custom logic. **These accept multi-line scripts** with multiple commands.
+
+### Example: Multiple Commands in Pre/Post Steps
+
+```yaml
+jobs:
+  plan:
+    uses: your-org/pipeline-templates/.github/workflows/Terraform/Azure/workflows/plan.yml@main
+    with:
+      environment: staging
+      var-file: staging.tfvars
+      terraform-version: '1.7.0'
+      working-directory: './terraform'
+      backend-resource-group: ${{ vars.BACKEND_RESOURCE_GROUP_NAME }}
+      backend-storage-account: ${{ vars.BACKEND_STORAGE_ACCOUNT_NAME }}
+      backend-container: ${{ vars.BACKEND_CONTAINER_NAME }}
+      backend-key: ${{ vars.BACKEND_KEY }}
+      template-repo: 'your-org/pipeline-templates'
+      pre-step: |
+        echo "🔍 Pre-plan checks starting..."
+        
+        # Check database connectivity
+        echo "Checking database..."
+        timeout 5 bash -c '</dev/tcp/db.example.com/5432' || exit 1
+        
+        # Verify API is responding
+        echo "Checking API health..."
+        curl -f https://api.staging.example.com/health || exit 1
+        
+        # Send notification
+        curl -X POST https://slack.com/api/chat.postMessage \
+          -H "Authorization: Bearer ${{ secrets.SLACK_TOKEN }}" \
+          -d "text=🚀 Starting Terraform plan for staging"
+        
+        echo "✅ All pre-checks passed"
+      post-step: |
+        echo "📊 Post-plan actions starting..."
+        
+        # Extract cost estimate from plan (if using Infracost)
+        # infracost breakdown --path tfplan
+        
+        # Send plan summary to Slack
+        curl -X POST https://slack.com/api/chat.postMessage \
+          -H "Authorization: Bearer ${{ secrets.SLACK_TOKEN }}" \
+          -d "text=✅ Terraform plan completed for staging"
+        
+        # Update status in monitoring system
+        curl -X POST https://monitoring.example.com/api/events \
+          -H "Content-Type: application/json" \
+          -d '{"event": "terraform_plan_complete", "env": "staging"}'
+        
+        echo "✅ Post-plan actions complete"
+    secrets: inherit
+```
+
+### Example: Notification Before/After Plan
+
+In your main `terraform.yml` file:
+
+```yaml
+jobs:
+  plan:
+    name: Plan
+    needs: validate
+    uses: your-org/pipeline-templates/.github/workflows/Terraform/Azure/workflows/plan.yml@main
+    with:
+      environment: staging
+      var-file: staging.tfvars
+      terraform-version: '1.7.0'
+      working-directory: './terraform'
+      backend-resource-group: ${{ vars.BACKEND_RESOURCE_GROUP_NAME }}
+      backend-storage-account: ${{ vars.BACKEND_STORAGE_ACCOUNT_NAME }}
+      backend-container: ${{ vars.BACKEND_CONTAINER_NAME }}
+      backend-key: ${{ vars.BACKEND_KEY }}
+      template-repo: 'your-org/pipeline-templates'
+      template-ref: 'main'
+      pre-step: |
+        echo "🔍 Starting infrastructure plan..."
+        curl -X POST https://slack.com/api/chat.postMessage \
+          -H "Authorization: Bearer ${{ secrets.SLACK_TOKEN }}" \
+          -d "text=Starting Terraform plan for staging"
+      post-step: |
+        echo "✅ Plan completed"
+        curl -X POST https://slack.com/api/chat.postMessage \
+          -H "Authorization: Bearer ${{ secrets.SLACK_TOKEN }}" \
+          -d "text=Terraform plan completed for staging"
+    secrets: inherit
+```
+
+### Example: Pre-Check Database Connection
+
+```yaml
+jobs:
+  plan:
+    uses: your-org/pipeline-templates/.github/workflows/Terraform/Azure/workflows/plan.yml@main
+    with:
+      environment: production
+      var-file: prod.tfvars
+      backend-resource-group: ${{ vars.BACKEND_RESOURCE_GROUP_NAME }}
+      backend-storage-account: ${{ vars.BACKEND_STORAGE_ACCOUNT_NAME }}
+      backend-container: ${{ vars.BACKEND_CONTAINER_NAME }}
+      backend-key: ${{ vars.BACKEND_KEY }}
+      template-repo: 'your-org/pipeline-templates'
+      pre-step: |
+        echo "Checking database connectivity..."
+        timeout 5 bash -c '</dev/tcp/db.example.com/5432' || exit 1
+        echo "Database is reachable"
+    secrets: inherit
+```
+
+### Example: Post-Apply Health Check
+
+```yaml
+jobs:
+  apply:
+    uses: your-org/pipeline-templates/.github/workflows/Terraform/Azure/workflows/apply.yml@main
+    with:
+      environment: staging
+      backend-resource-group: ${{ vars.BACKEND_RESOURCE_GROUP_NAME }}
+      backend-storage-account: ${{ vars.BACKEND_STORAGE_ACCOUNT_NAME }}
+      backend-container: ${{ vars.BACKEND_CONTAINER_NAME }}
+      backend-key: ${{ vars.BACKEND_KEY }}
+      template-repo: 'your-org/pipeline-templates'
+      post-step: |
+        echo "🏥 Running post-deployment health checks..."
+        
+        # Wait for services to stabilize
+        echo "Waiting 30 seconds for services to start..."
+        sleep 30
+        
+        # Check API health
+        echo "Checking API health endpoint..."
+        curl -f https://api.staging.example.com/health || exit 1
+        
+        # Check database migrations
+        echo "Verifying database migrations..."
+        curl -f https://api.staging.example.com/api/migrations/status || exit 1
+        
+        # Run smoke tests
+        echo "Running smoke tests..."
+        curl -f https://api.staging.example.com/api/test/smoke || exit 1
+        
+        # Send success notification
+        curl -X POST https://slack.com/api/chat.postMessage \
+          -H "Authorization: Bearer ${{ secrets.SLACK_TOKEN }}" \
+          -d "text=✅ Deployment to staging complete and healthy!"
+        
+        echo "✅ All health checks passed"
+    secrets: inherit
+```
+
+### Example: Pre-Apply Backup and Validation
+
+```yaml
+jobs:
+  apply:
+    uses: your-org/pipeline-templates/.github/workflows/Terraform/Azure/workflows/apply.yml@main
+    with:
+      environment: production
+      backend-resource-group: ${{ vars.BACKEND_RESOURCE_GROUP_NAME }}
+      backend-storage-account: ${{ vars.BACKEND_STORAGE_ACCOUNT_NAME }}
+      backend-container: ${{ vars.BACKEND_CONTAINER_NAME }}
+      backend-key: ${{ vars.BACKEND_KEY }}
+      template-repo: 'your-org/pipeline-templates'
+      pre-step: |
+        echo "🔒 Pre-apply safety checks for PRODUCTION..."
+        
+        # Create backup of current state
+        echo "Creating state backup..."
+        az storage blob download \
+          --account-name ${{ vars.BACKEND_STORAGE_ACCOUNT_NAME }} \
+          --container-name ${{ vars.BACKEND_CONTAINER_NAME }} \
+          --name ${{ vars.BACKEND_KEY }} \
+          --file "backup-$(date +%Y%m%d-%H%M%S).tfstate"
+        
+        # Verify we're in business hours (optional safety check)
+        current_hour=$(date +%H)
+        if [ $current_hour -lt 9 ] || [ $current_hour -gt 17 ]; then
+          echo "⚠️ Warning: Deploying outside business hours"
+        fi
+        
+        # Check for active incidents
+        incident_count=$(curl -s https://monitoring.example.com/api/incidents/active | jq length)
+        if [ $incident_count -gt 0 ]; then
+          echo "❌ Active incidents detected. Aborting deployment."
+          exit 1
+        fi
+        
+        echo "✅ All pre-apply checks passed"
+      post-step: |
+        echo "📢 Post-apply notifications..."
+        
+        # Send deployment notification to multiple channels
+        curl -X POST https://slack.com/api/chat.postMessage \
+          -H "Authorization: Bearer ${{ secrets.SLACK_TOKEN }}" \
+          -d "text=🚀 Production deployment complete!"
+        
+        # Update change log
+        curl -X POST https://changelog.example.com/api/entries \
+          -H "Content-Type: application/json" \
+          -d "{\"message\": \"Infrastructure update\", \"env\": \"production\"}"
+        
+        # Trigger monitoring alert reset
+        curl -X POST https://monitoring.example.com/api/deploy-complete \
+          -d "environment=production"
+    secrets: inherit
+```
+
+### Example: Cache Cleanup After Validation
+
+```yaml
+jobs:
+  validate:
+    uses: your-org/pipeline-templates/.github/workflows/Terraform/Azure/workflows/validate.yml@main
+    with:
+      environment: staging
+      backend-resource-group: ${{ vars.BACKEND_RESOURCE_GROUP_NAME }}
+      backend-storage-account: ${{ vars.BACKEND_STORAGE_ACCOUNT_NAME }}
+      backend-container: ${{ vars.BACKEND_CONTAINER_NAME }}
+      backend-key: ${{ vars.BACKEND_KEY }}
+      template-repo: 'your-org/pipeline-templates'
+      post-step: |
+        echo "Cleaning up temporary files..."
+        rm -rf /tmp/terraform-*
+    secrets: inherit
+```
+
+### Available Context in Pre/Post Steps
+
+Pre and post steps have access to:
+- ✅ All repository secrets (via `${{ secrets.SECRET_NAME }}`)
+- ✅ Environment variables
+- ✅ Workspace files (after checkout)
+- ✅ All standard bash commands and utilities
+- ✅ Terraform files and state (in post-steps)
+- ✅ Multi-line scripts with multiple commands
+- ✅ Conditional logic (if/then/else)
+- ✅ Loops and functions
+
+### Tips for Multi-Step Scripts
+
+1. **Use multi-line format** with `|` for readability:
+   ```yaml
+   pre-step: |
+     command1
+     command2
+     command3
+   ```
+
+2. **Exit on error** to stop the workflow if a check fails:
+   ```yaml
+   pre-step: |
+     curl -f https://api.example.com/health || exit 1
+   ```
+
+3. **Use functions** for complex logic:
+   ```yaml
+   pre-step: |
+     check_health() {
+       local url=$1
+       echo "Checking $url..."
+       curl -f "$url" || return 1
+     }
+     
+     check_health "https://api.example.com/health"
+     check_health "https://db.example.com/health"
+   ```
+
+4. **Add logging** to track execution:
+   ```yaml
+   pre-step: |
+     echo "Step 1: Checking database..."
+     # check database
+     echo "Step 2: Verifying API..."
+     # check API
+     echo "✅ All checks complete"
+   ```
 
 ## Usage Examples
 
