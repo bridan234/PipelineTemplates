@@ -1,0 +1,204 @@
+name: DotNet Build (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment name'
+        required: true
+        type: string
+      dotnet-version:
+        description: '.NET SDK version'
+        required: true
+        type: string
+      working-directory:
+        description: 'Working directory'
+        required: false
+        type: string
+        default: './'
+      configuration:
+        description: 'Build configuration (Debug or Release)'
+        required: false
+        type: string
+        default: 'Release'
+      run-tests:
+        description: 'Run tests after build'
+        required: false
+        type: boolean
+        default: true
+      collect-coverage:
+        description: 'Collect code coverage'
+        required: false
+        type: boolean
+        default: true
+      coverage-threshold:
+        description: 'Minimum code coverage percentage'
+        required: false
+        type: string
+        default: '0'
+      pre-restore-step:
+        description: 'Custom script to run before restore'
+        required: false
+        type: string
+        default: ''
+      post-restore-step:
+        description: 'Custom script to run after restore'
+        required: false
+        type: string
+        default: ''
+      pre-build-step:
+        description: 'Custom script to run before build'
+        required: false
+        type: string
+        default: ''
+      post-build-step:
+        description: 'Custom script to run after build'
+        required: false
+        type: string
+        default: ''
+      pre-test-step:
+        description: 'Custom script to run before tests'
+        required: false
+        type: string
+        default: ''
+      post-test-step:
+        description: 'Custom script to run after tests'
+        required: false
+        type: string
+        default: ''
+    outputs:
+      build-version:
+        description: 'Build version number'
+        value: ${{ jobs.build.outputs.version }}
+      test-result:
+        description: 'Test execution result'
+        value: ${{ jobs.test.outputs.result }}
+      coverage-percentage:
+        description: 'Code coverage percentage'
+        value: ${{ jobs.test.outputs.coverage }}
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    outputs:
+      version: ${{ steps.build.outputs.build-version }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Templates
+        uses: actions/download-artifact@v4
+        with:
+          name: pipeline-templates-${{ github.run_id }}
+          path: .github/actions/dotnet
+        continue-on-error: true
+
+      - name: Setup .NET
+        uses: ./.github/actions/dotnet/setup
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+          enable-caching: 'true'
+
+      - name: Pre-Restore Step
+        if: inputs.pre-restore-step != ''
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.pre-restore-step }}
+
+      - name: Restore Dependencies
+        uses: ./.github/actions/dotnet/restore
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          configuration: ${{ inputs.configuration }}
+
+      - name: Post-Restore Step
+        if: inputs.post-restore-step != ''
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.post-restore-step }}
+
+      - name: Pre-Build Step
+        if: inputs.pre-build-step != ''
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.pre-build-step }}
+
+      - name: Build Project
+        id: build
+        uses: ./.github/actions/dotnet/build
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          configuration: ${{ inputs.configuration }}
+          no-restore: 'true'
+          treat-warnings-as-errors: 'true'
+
+      - name: Post-Build Step
+        if: inputs.post-build-step != ''
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.post-build-step }}
+
+  test:
+    name: Test
+    needs: build
+    if: inputs.run-tests == true
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    outputs:
+      result: ${{ steps.test.outputs.test-result }}
+      coverage: ${{ steps.test.outputs.coverage-percentage }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Templates
+        uses: actions/download-artifact@v4
+        with:
+          name: pipeline-templates-${{ github.run_id }}
+          path: .github/actions/dotnet
+        continue-on-error: true
+
+      - name: Setup .NET
+        uses: ./.github/actions/dotnet/setup
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+          enable-caching: 'true'
+
+      - name: Restore Dependencies
+        uses: ./.github/actions/dotnet/restore
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          configuration: ${{ inputs.configuration }}
+
+      - name: Build Project
+        uses: ./.github/actions/dotnet/build
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          configuration: ${{ inputs.configuration }}
+          no-restore: 'true'
+
+      - name: Pre-Test Step
+        if: inputs.pre-test-step != ''
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.pre-test-step }}
+
+      - name: Run Tests
+        id: test
+        uses: ./.github/actions/dotnet/test
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          configuration: ${{ inputs.configuration }}
+          no-build: 'true'
+          collect-coverage: ${{ inputs.collect-coverage }}
+          coverage-threshold: ${{ inputs.coverage-threshold }}
+
+      - name: Post-Test Step
+        if: inputs.post-test-step != ''
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.post-test-step }}

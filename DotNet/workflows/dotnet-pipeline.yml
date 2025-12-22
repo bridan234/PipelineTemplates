@@ -1,0 +1,373 @@
+name: DotNet CI/CD Pipeline
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - '*.csproj'
+      - '*.sln'
+      - '.github/workflows/dotnet-pipeline.yml'
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - '*.csproj'
+      - '*.sln'
+      - '.github/workflows/dotnet-pipeline.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment'
+        required: true
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        default: 'build'
+        options:
+          - build
+          - deploy
+          - build-and-deploy
+      run-tests:
+        description: 'Run tests'
+        required: false
+        type: boolean
+        default: true
+      collect-coverage:
+        description: 'Collect code coverage'
+        required: false
+        type: boolean
+        default: true
+      coverage-threshold:
+        description: 'Minimum code coverage percentage'
+        required: false
+        type: string
+        default: '80'
+      # Pre/Post steps for Restore
+      pre-restore-step:
+        description: 'Custom script to run before restore (optional)'
+        required: false
+        type: string
+        default: ''
+      post-restore-step:
+        description: 'Custom script to run after restore (optional)'
+        required: false
+        type: string
+        default: ''
+      # Pre/Post steps for Build
+      pre-build-step:
+        description: 'Custom script to run before build (optional)'
+        required: false
+        type: string
+        default: ''
+      post-build-step:
+        description: 'Custom script to run after build (optional)'
+        required: false
+        type: string
+        default: ''
+      # Pre/Post steps for Test
+      pre-test-step:
+        description: 'Custom script to run before tests (optional)'
+        required: false
+        type: string
+        default: ''
+      post-test-step:
+        description: 'Custom script to run after tests (optional)'
+        required: false
+        type: string
+        default: ''
+      # Pre/Post steps for Publish
+      pre-publish-step:
+        description: 'Custom script to run before publish (optional)'
+        required: false
+        type: string
+        default: ''
+      post-publish-step:
+        description: 'Custom script to run after publish (optional)'
+        required: false
+        type: string
+        default: ''
+      # Pre/Post steps for Deploy
+      pre-deploy-step:
+        description: 'Custom script to run before deployment (optional)'
+        required: false
+        type: string
+        default: ''
+      post-deploy-step:
+        description: 'Custom script to run after deployment (optional)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+  actions: write
+  checks: write
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  WORKING_DIRECTORY: './'
+  CONFIGURATION: 'Release'
+
+jobs:
+  # Step 0: Setup - Download templates once for all workflows
+  setup:
+    name: Download Templates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Templates
+        uses: actions/checkout@v4
+        with:
+          repository: 'your-org/pipeline-templates'
+          ref: 'main'
+          path: .pipeline-templates
+
+      - name: Upload Templates
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-templates-${{ github.run_id }}
+          path: .pipeline-templates/DotNet/actions
+          retention-days: 1
+
+  # Step 1: Build & Test
+  build:
+    name: Build & Test
+    needs: [setup]
+    if: |
+      github.event_name == 'pull_request' || 
+      github.event_name == 'push' || 
+      github.event.inputs.action == 'build' || 
+      github.event.inputs.action == 'build-and-deploy'
+    uses: ./.github/workflows/dotnet/build.yml
+    with:
+      environment: ${{ github.event.inputs.environment || 'development' }}
+      dotnet-version: ${{ vars.DOTNET_VERSION || env.DOTNET_VERSION }}
+      working-directory: ${{ vars.WORKING_DIRECTORY || env.WORKING_DIRECTORY }}
+      configuration: ${{ vars.BUILD_CONFIGURATION || env.CONFIGURATION }}
+      run-tests: ${{ github.event.inputs.run-tests != 'false' }}
+      collect-coverage: ${{ github.event.inputs.collect-coverage != 'false' }}
+      coverage-threshold: ${{ github.event.inputs.coverage-threshold || '80' }}
+      pre-restore-step: ${{ github.event.inputs.pre-restore-step || '' }}
+      post-restore-step: ${{ github.event.inputs.post-restore-step || '' }}
+      pre-build-step: ${{ github.event.inputs.pre-build-step || '' }}
+      post-build-step: ${{ github.event.inputs.post-build-step || '' }}
+      pre-test-step: ${{ github.event.inputs.pre-test-step || '' }}
+      post-test-step: ${{ github.event.inputs.post-test-step || '' }}
+    secrets: inherit
+
+  # Step 2: Security Scan
+  security-scan:
+    name: Security Scan
+    needs: [setup, build]
+    if: |
+      github.event_name == 'pull_request' || 
+      github.event_name == 'push' || 
+      github.event.inputs.action != 'build'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run security scan
+        shell: bash
+        run: |
+          echo "🔒 Running security scan..."
+          # Add your security scanning tools here
+          # Example: dotnet list package --vulnerable
+          dotnet list package --vulnerable --include-transitive || true
+          echo "✅ Security scan completed"
+
+  # Step 3: Code Quality Analysis
+  code-quality:
+    name: Code Quality
+    needs: [setup, build]
+    if: |
+      github.event_name == 'pull_request' || 
+      github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ vars.DOTNET_VERSION || env.DOTNET_VERSION }}
+
+      - name: Run code analysis
+        shell: bash
+        run: |
+          echo "📊 Running code quality analysis..."
+          # Add your code quality tools here
+          # Example: SonarQube, CodeQL, etc.
+          echo "✅ Code quality analysis completed"
+
+  # Step 4: Build Summary
+  build-summary:
+    name: Build Summary
+    needs: [build, security-scan, code-quality]
+    if: always() && needs.build.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate Summary
+        shell: bash
+        run: |
+          echo "## Build Pipeline Summary 🎯" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build:** ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ needs.build.outputs.build-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tests:** ${{ needs.build.outputs.test-result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Coverage:** ${{ needs.build.outputs.coverage-percentage }}%" >> $GITHUB_STEP_SUMMARY
+          echo "- **Security Scan:** ${{ needs.security-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Code Quality:** ${{ needs.code-quality.result }}" >> $GITHUB_STEP_SUMMARY
+
+  # Step 5: Approval Gate (for production deployments)
+  approve:
+    name: Approve Deployment
+    needs: [build, security-scan, code-quality]
+    if: |
+      github.event_name != 'pull_request' && 
+      (github.event.inputs.action == 'deploy' || github.event.inputs.action == 'build-and-deploy') &&
+      github.event.inputs.environment == 'production'
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Approval Gate
+        run: |
+          echo "⏳ Waiting for approval to deploy to ${{ github.event.inputs.environment }}"
+          echo "✅ Deployment approved"
+
+  # Step 6: Deploy to Staging (automatic for non-prod)
+  deploy-staging:
+    name: Deploy to Staging
+    needs: [build, security-scan, code-quality]
+    if: |
+      github.event_name != 'pull_request' && 
+      (github.event.inputs.action == 'deploy' || github.event.inputs.action == 'build-and-deploy') &&
+      github.event.inputs.environment == 'staging'
+    uses: ./.github/workflows/dotnet/deploy.yml
+    with:
+      environment: staging
+      dotnet-version: ${{ vars.DOTNET_VERSION || needs.build.outputs.dotnet-version }}
+      working-directory: ${{ vars.WORKING_DIRECTORY || '.' }}
+      configuration: ${{ vars.BUILD_CONFIGURATION || 'Release' }}
+      deployment-type: ${{ vars.DEPLOYMENT_TYPE || 'app-service' }}
+      app-name: ${{ vars.STAGING_APP_NAME }}
+      resource-group: ${{ vars.STAGING_RESOURCE_GROUP }}
+      slot-name: 'production'
+      runtime: ${{ vars.TARGET_RUNTIME || '' }}
+      self-contained: false
+      pre-publish-step: ${{ github.event.inputs.pre-publish-step || '' }}
+      post-publish-step: ${{ github.event.inputs.post-publish-step || '' }}
+      pre-deploy-step: ${{ github.event.inputs.pre-deploy-step || '' }}
+      post-deploy-step: ${{ github.event.inputs.post-deploy-step || '' }}
+    secrets: inherit
+
+  # Step 7: Deploy to Production (requires approval)
+  deploy-production:
+    name: Deploy to Production
+    needs: [build, security-scan, code-quality, approve]
+    if: |
+      github.event_name != 'pull_request' && 
+      (github.event.inputs.action == 'deploy' || github.event.inputs.action == 'build-and-deploy') &&
+      github.event.inputs.environment == 'production'
+    uses: ./.github/workflows/dotnet/deploy.yml
+    with:
+      environment: production
+      dotnet-version: ${{ vars.DOTNET_VERSION || needs.build.outputs.dotnet-version }}
+      working-directory: ${{ vars.WORKING_DIRECTORY || '.' }}
+      configuration: ${{ vars.BUILD_CONFIGURATION || 'Release' }}
+      deployment-type: ${{ vars.DEPLOYMENT_TYPE || 'app-service' }}
+      app-name: ${{ vars.PRODUCTION_APP_NAME }}
+      resource-group: ${{ vars.PRODUCTION_RESOURCE_GROUP }}
+      slot-name: 'production'
+      runtime: ${{ vars.TARGET_RUNTIME || '' }}
+      self-contained: false
+      pre-publish-step: ${{ github.event.inputs.pre-publish-step || '' }}
+      post-publish-step: ${{ github.event.inputs.post-publish-step || '' }}
+      pre-deploy-step: ${{ github.event.inputs.pre-deploy-step || '' }}
+      post-deploy-step: ${{ github.event.inputs.post-deploy-step || '' }}
+    secrets: inherit
+
+  # Step 8: Smoke Tests (Post-Deployment Verification)
+  smoke-tests:
+    name: Smoke Tests
+    needs: [deploy-staging, deploy-production]
+    if: |
+      always() && 
+      (needs.deploy-staging.result == 'success' || needs.deploy-production.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run smoke tests
+        shell: bash
+        run: |
+          DEPLOYMENT_URL="${{ needs.deploy-staging.outputs.deployment-url || needs.deploy-production.outputs.deployment-url }}"
+          echo "🧪 Running smoke tests against: $DEPLOYMENT_URL"
+          
+          # Basic health check
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$DEPLOYMENT_URL/health" || echo "000")
+          
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+            echo "✅ Smoke tests passed - Health check OK (HTTP $HTTP_STATUS)"
+          else
+            echo "❌ Smoke tests failed - Health check failed (HTTP $HTTP_STATUS)"
+            exit 1
+          fi
+
+  # Step 9: Deployment Summary
+  deployment-summary:
+    name: Deployment Summary
+    needs: [deploy-staging, deploy-production, smoke-tests]
+    if: always() && (needs.deploy-staging.result != 'skipped' || needs.deploy-production.result != 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate Summary
+        shell: bash
+        run: |
+          echo "## Deployment Pipeline Summary 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.deploy-staging.result }}" != "skipped" ]; then
+            echo "### Staging Deployment" >> $GITHUB_STEP_SUMMARY
+            echo "- **Status:** ${{ needs.deploy-staging.result }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **URL:** [${{ needs.deploy-staging.outputs.deployment-url }}](${{ needs.deploy-staging.outputs.deployment-url }})" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ needs.deploy-production.result }}" != "skipped" ]; then
+            echo "### Production Deployment" >> $GITHUB_STEP_SUMMARY
+            echo "- **Status:** ${{ needs.deploy-production.result }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **URL:** [${{ needs.deploy-production.outputs.deployment-url }}](${{ needs.deploy-production.outputs.deployment-url }})" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "### Smoke Tests" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ needs.smoke-tests.result }}" >> $GITHUB_STEP_SUMMARY
+
+  # Step 10: Rollback (manual trigger only)
+  rollback:
+    name: Rollback
+    if: failure() && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Initiate Rollback
+        shell: bash
+        run: |
+          echo "⚠️ Deployment failed - Rollback may be required"
+          echo "Please review the deployment and consider rolling back to the previous version"
+          # Add rollback automation here if needed

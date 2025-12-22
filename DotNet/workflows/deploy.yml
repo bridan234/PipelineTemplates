@@ -1,0 +1,205 @@
+name: DotNet Deploy (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment name'
+        required: true
+        type: string
+      dotnet-version:
+        description: '.NET SDK version'
+        required: true
+        type: string
+      working-directory:
+        description: 'Working directory'
+        required: false
+        type: string
+        default: './'
+      configuration:
+        description: 'Build configuration (Debug or Release)'
+        required: false
+        type: string
+        default: 'Release'
+      deployment-type:
+        description: 'Deployment type (app-service, container-apps, function-app)'
+        required: true
+        type: string
+      app-name:
+        description: 'Azure App Service or Function App name'
+        required: true
+        type: string
+      resource-group:
+        description: 'Azure Resource Group name'
+        required: false
+        type: string
+        default: ''
+      slot-name:
+        description: 'Deployment slot name'
+        required: false
+        type: string
+        default: 'production'
+      runtime:
+        description: 'Target runtime identifier'
+        required: false
+        type: string
+        default: ''
+      self-contained:
+        description: 'Publish as self-contained'
+        required: false
+        type: boolean
+        default: false
+      container-registry:
+        description: 'Container registry URL'
+        required: false
+        type: string
+        default: ''
+      container-image:
+        description: 'Container image name and tag'
+        required: false
+        type: string
+        default: ''
+      pre-publish-step:
+        description: 'Custom script to run before publish'
+        required: false
+        type: string
+        default: ''
+      post-publish-step:
+        description: 'Custom script to run after publish'
+        required: false
+        type: string
+        default: ''
+      pre-deploy-step:
+        description: 'Custom script to run before deployment'
+        required: false
+        type: string
+        default: ''
+      post-deploy-step:
+        description: 'Custom script to run after deployment'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      azure-client-id:
+        required: true
+      azure-tenant-id:
+        required: true
+      azure-subscription-id:
+        required: true
+    outputs:
+      deployment-url:
+        description: 'URL of deployed application'
+        value: ${{ jobs.deploy.outputs.url }}
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Templates
+        uses: actions/download-artifact@v4
+        with:
+          name: pipeline-templates-${{ github.run_id }}
+          path: .github/actions/dotnet
+        continue-on-error: true
+
+      - name: Setup .NET & Azure
+        uses: ./.github/actions/dotnet/setup
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+          azure-client-id: ${{ secrets.azure-client-id }}
+          azure-tenant-id: ${{ secrets.azure-tenant-id }}
+          azure-subscription-id: ${{ secrets.azure-subscription-id }}
+          enable-caching: 'true'
+
+      - name: Restore Dependencies
+        uses: ./.github/actions/dotnet/restore
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          configuration: ${{ inputs.configuration }}
+
+      - name: Build Project
+        uses: ./.github/actions/dotnet/build
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          configuration: ${{ inputs.configuration }}
+          no-restore: 'true'
+
+      - name: Pre-Publish Step
+        if: inputs.pre-publish-step != ''
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.pre-publish-step }}
+
+      - name: Publish Application
+        uses: ./.github/actions/dotnet/publish
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          configuration: ${{ inputs.configuration }}
+          runtime: ${{ inputs.runtime }}
+          self-contained: ${{ inputs.self-contained }}
+          no-build: 'true'
+
+      - name: Post-Publish Step
+        if: inputs.post-publish-step != ''
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.post-publish-step }}
+
+  deploy:
+    name: Deploy to Azure
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    outputs:
+      url: ${{ steps.deploy.outputs.deployment-url }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Templates
+        uses: actions/download-artifact@v4
+        with:
+          name: pipeline-templates-${{ github.run_id }}
+          path: .github/actions/dotnet
+        continue-on-error: true
+
+      - name: Setup Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.azure-client-id }}
+          tenant-id: ${{ secrets.azure-tenant-id }}
+          subscription-id: ${{ secrets.azure-subscription-id }}
+
+      - name: Pre-Deploy Step
+        if: inputs.pre-deploy-step != ''
+        shell: bash
+        run: ${{ inputs.pre-deploy-step }}
+
+      - name: Deploy to Azure
+        id: deploy
+        uses: ./.github/actions/dotnet/deploy
+        with:
+          deployment-type: ${{ inputs.deployment-type }}
+          app-name: ${{ inputs.app-name }}
+          resource-group: ${{ inputs.resource-group }}
+          slot-name: ${{ inputs.slot-name }}
+          container-registry: ${{ inputs.container-registry }}
+          container-image: ${{ inputs.container-image }}
+
+      - name: Post-Deploy Step
+        if: inputs.post-deploy-step != ''
+        shell: bash
+        run: ${{ inputs.post-deploy-step }}
+
+      - name: Deployment Summary
+        shell: bash
+        run: |
+          echo "✅ Deployment completed successfully"
+          echo "🌐 Application URL: ${{ steps.deploy.outputs.deployment-url }}"

@@ -1,0 +1,68 @@
+name: 'DotNet Build'
+description: 'Build .NET project'
+inputs:
+  working-directory:
+    description: 'Working directory for the project'
+    required: false
+    default: './'
+  configuration:
+    description: 'Build configuration (Debug or Release)'
+    required: false
+    default: 'Release'
+  version-suffix:
+    description: 'Version suffix for the build'
+    required: false
+    default: ''
+  no-restore:
+    description: 'Skip restore step if already done'
+    required: false
+    default: 'true'
+  verbosity:
+    description: 'Logging verbosity (quiet, minimal, normal, detailed, diagnostic)'
+    required: false
+    default: 'minimal'
+  treat-warnings-as-errors:
+    description: 'Treat warnings as errors'
+    required: false
+    default: 'false'
+
+outputs:
+  build-version:
+    description: 'Build version number'
+    value: ${{ steps.build.outputs.version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Build project
+      id: build
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        BUILD_ARGS="--configuration ${{ inputs.configuration }} --verbosity ${{ inputs.verbosity }}"
+        
+        if [ "${{ inputs.no-restore }}" == "true" ]; then
+          BUILD_ARGS="$BUILD_ARGS --no-restore"
+        fi
+        
+        if [ -n "${{ inputs.version-suffix }}" ]; then
+          BUILD_ARGS="$BUILD_ARGS --version-suffix ${{ inputs.version-suffix }}"
+        fi
+        
+        if [ "${{ inputs.treat-warnings-as-errors }}" == "true" ]; then
+          BUILD_ARGS="$BUILD_ARGS -warnaserror"
+        fi
+        
+        dotnet build $BUILD_ARGS
+        
+        # Extract version from project file
+        VERSION=$(dotnet msbuild -getProperty:Version -nologo)
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "✅ Build completed - Version: $VERSION"
+
+    - name: List build artifacts
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "Build artifacts:"
+        find . -type f \( -name "*.dll" -o -name "*.exe" \) -path "*/bin/${{ inputs.configuration }}/*" -newer . 2>/dev/null || true

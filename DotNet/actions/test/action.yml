@@ -1,0 +1,136 @@
+name: 'DotNet Test'
+description: 'Run .NET tests with code coverage'
+inputs:
+  working-directory:
+    description: 'Working directory for the project'
+    required: false
+    default: './'
+  configuration:
+    description: 'Build configuration (Debug or Release)'
+    required: false
+    default: 'Release'
+  no-build:
+    description: 'Skip build step if already done'
+    required: false
+    default: 'true'
+  collect-coverage:
+    description: 'Collect code coverage'
+    required: false
+    default: 'true'
+  coverage-threshold:
+    description: 'Minimum code coverage percentage (0-100)'
+    required: false
+    default: '0'
+  test-filter:
+    description: 'Filter expression to run specific tests'
+    required: false
+    default: ''
+  verbosity:
+    description: 'Logging verbosity (quiet, minimal, normal, detailed, diagnostic)'
+    required: false
+    default: 'minimal'
+  results-directory:
+    description: 'Directory for test results'
+    required: false
+    default: './TestResults'
+
+outputs:
+  test-result:
+    description: 'Test execution result (success/failure)'
+    value: ${{ steps.test.outputs.result }}
+  coverage-percentage:
+    description: 'Code coverage percentage'
+    value: ${{ steps.coverage.outputs.percentage }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run tests
+      id: test
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        TEST_ARGS="--configuration ${{ inputs.configuration }} --verbosity ${{ inputs.verbosity }}"
+        TEST_ARGS="$TEST_ARGS --results-directory ${{ inputs.results-directory }}"
+        TEST_ARGS="$TEST_ARGS --logger 'trx' --logger 'console;verbosity=detailed'"
+        
+        if [ "${{ inputs.no-build }}" == "true" ]; then
+          TEST_ARGS="$TEST_ARGS --no-build"
+        fi
+        
+        if [ "${{ inputs.collect-coverage }}" == "true" ]; then
+          TEST_ARGS="$TEST_ARGS --collect:'XPlat Code Coverage'"
+          TEST_ARGS="$TEST_ARGS -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover"
+        fi
+        
+        if [ -n "${{ inputs.test-filter }}" ]; then
+          TEST_ARGS="$TEST_ARGS --filter '${{ inputs.test-filter }}'"
+        fi
+        
+        if dotnet test $TEST_ARGS; then
+          echo "result=success" >> $GITHUB_OUTPUT
+          echo "✅ All tests passed"
+        else
+          echo "result=failure" >> $GITHUB_OUTPUT
+          echo "❌ Tests failed"
+          exit 1
+        fi
+
+    - name: Process code coverage
+      id: coverage
+      if: inputs.collect-coverage == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        # Install ReportGenerator for coverage reporting
+        dotnet tool install --global dotnet-reportgenerator-globaltool 2>/dev/null || true
+        
+        # Generate coverage report
+        reportgenerator \
+          "-reports:${{ inputs.results-directory }}/**/coverage.opencover.xml" \
+          "-targetdir:${{ inputs.results-directory }}/coveragereport" \
+          "-reporttypes:Html;JsonSummary;Badges"
+        
+        # Extract coverage percentage
+        if [ -f "${{ inputs.results-directory }}/coveragereport/Summary.json" ]; then
+          COVERAGE=$(cat "${{ inputs.results-directory }}/coveragereport/Summary.json" | grep -o '"linecoverage":[0-9.]*' | grep -o '[0-9.]*')
+          echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
+          echo "📊 Code Coverage: $COVERAGE%"
+          
+          # Check coverage threshold
+          THRESHOLD=${{ inputs.coverage-threshold }}
+          if (( $(echo "$COVERAGE < $THRESHOLD" | bc -l) )); then
+            echo "❌ Coverage $COVERAGE% is below threshold $THRESHOLD%"
+            exit 1
+          else
+            echo "✅ Coverage $COVERAGE% meets threshold $THRESHOLD%"
+          fi
+        fi
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-${{ github.run_id }}
+        path: ${{ inputs.working-directory }}/${{ inputs.results-directory }}
+        retention-days: 30
+
+    - name: Publish test summary
+      if: always()
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [ -f "${{ inputs.results-directory }}/*.trx" ]; then
+          echo "## Test Results 🧪" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          # Parse and display test summary
+          TRX_FILE=$(find "${{ inputs.results-directory }}" -name "*.trx" | head -1)
+          if [ -n "$TRX_FILE" ]; then
+            TOTAL=$(grep -o 'total="[0-9]*"' "$TRX_FILE" | grep -o '[0-9]*' || echo "0")
+            PASSED=$(grep -o 'passed="[0-9]*"' "$TRX_FILE" | grep -o '[0-9]*' || echo "0")
+            FAILED=$(grep -o 'failed="[0-9]*"' "$TRX_FILE" | grep -o '[0-9]*' || echo "0")
+            echo "- **Total Tests:** $TOTAL" >> $GITHUB_STEP_SUMMARY
+            echo "- **Passed:** ✅ $PASSED" >> $GITHUB_STEP_SUMMARY
+            echo "- **Failed:** ❌ $FAILED" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi

@@ -1,0 +1,126 @@
+name: 'Deploy to Azure'
+description: 'Deploy .NET application to Azure App Service or Container Apps'
+inputs:
+  deployment-type:
+    description: 'Deployment type (app-service, container-apps, function-app)'
+    required: true
+  app-name:
+    description: 'Azure App Service or Function App name'
+    required: true
+  resource-group:
+    description: 'Azure Resource Group name'
+    required: false
+    default: ''
+  slot-name:
+    description: 'Deployment slot name'
+    required: false
+    default: 'production'
+  package-path:
+    description: 'Path to the deployment package'
+    required: false
+    default: './deployment-package.zip'
+  startup-command:
+    description: 'Custom startup command'
+    required: false
+    default: ''
+  container-registry:
+    description: 'Container registry URL (for container-based deployments)'
+    required: false
+    default: ''
+  container-image:
+    description: 'Container image name and tag'
+    required: false
+    default: ''
+
+outputs:
+  deployment-url:
+    description: 'URL of the deployed application'
+    value: ${{ steps.deploy.outputs.url }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Download deployment package
+      if: inputs.package-path == './deployment-package.zip'
+      uses: actions/download-artifact@v4
+      with:
+        name: deployment-package-${{ github.run_id }}
+        path: ./
+
+    - name: Deploy to Azure App Service
+      id: deploy-app-service
+      if: inputs.deployment-type == 'app-service'
+      uses: azure/webapps-deploy@v3
+      with:
+        app-name: ${{ inputs.app-name }}
+        slot-name: ${{ inputs.slot-name }}
+        package: ${{ inputs.package-path }}
+        startup-command: ${{ inputs.startup-command }}
+
+    - name: Deploy to Azure Function App
+      id: deploy-function
+      if: inputs.deployment-type == 'function-app'
+      uses: azure/functions-action@v1
+      with:
+        app-name: ${{ inputs.app-name }}
+        slot-name: ${{ inputs.slot-name }}
+        package: ${{ inputs.package-path }}
+
+    - name: Deploy to Azure Container Apps
+      id: deploy-container
+      if: inputs.deployment-type == 'container-apps'
+      shell: bash
+      run: |
+        az containerapp update \
+          --name ${{ inputs.app-name }} \
+          --resource-group ${{ inputs.resource-group }} \
+          --image ${{ inputs.container-registry }}/${{ inputs.container-image }}
+
+    - name: Set deployment URL
+      id: deploy
+      shell: bash
+      run: |
+        if [ "${{ inputs.deployment-type }}" == "app-service" ] || [ "${{ inputs.deployment-type }}" == "function-app" ]; then
+          URL="https://${{ inputs.app-name }}.azurewebsites.net"
+        elif [ "${{ inputs.deployment-type }}" == "container-apps" ]; then
+          URL=$(az containerapp show --name ${{ inputs.app-name }} --resource-group ${{ inputs.resource-group }} --query properties.configuration.ingress.fqdn -o tsv)
+          URL="https://$URL"
+        fi
+        echo "url=$URL" >> $GITHUB_OUTPUT
+        echo "✅ Deployed to: $URL"
+
+    - name: Verify deployment
+      shell: bash
+      run: |
+        URL="${{ steps.deploy.outputs.url }}"
+        echo "🔍 Verifying deployment at: $URL"
+        
+        MAX_RETRIES=10
+        RETRY_COUNT=0
+        
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL" || echo "000")
+          
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 400 ]; then
+            echo "✅ Deployment verified - HTTP Status: $HTTP_STATUS"
+            exit 0
+          fi
+          
+          RETRY_COUNT=$((RETRY_COUNT + 1))
+          echo "⏳ Waiting for deployment (Attempt $RETRY_COUNT/$MAX_RETRIES)..."
+          sleep 10
+        done
+        
+        echo "❌ Deployment verification failed after $MAX_RETRIES attempts"
+        exit 1
+
+    - name: Create deployment summary
+      if: always()
+      shell: bash
+      run: |
+        echo "## Deployment Summary 🚀" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **Deployment Type:** ${{ inputs.deployment-type }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **App Name:** ${{ inputs.app-name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Slot:** ${{ inputs.slot-name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **URL:** [${{ steps.deploy.outputs.url }}](${{ steps.deploy.outputs.url }})" >> $GITHUB_STEP_SUMMARY

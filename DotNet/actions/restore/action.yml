@@ -1,0 +1,45 @@
+name: 'DotNet Restore'
+description: 'Restore NuGet packages for .NET project'
+inputs:
+  working-directory:
+    description: 'Working directory for the project'
+    required: false
+    default: './'
+  configuration:
+    description: 'Build configuration (Debug or Release)'
+    required: false
+    default: 'Release'
+  verbosity:
+    description: 'Logging verbosity (quiet, minimal, normal, detailed, diagnostic)'
+    required: false
+    default: 'minimal'
+  use-lock-file:
+    description: 'Use package lock file for deterministic restore'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+
+    - name: Restore dependencies
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        RESTORE_ARGS="--configuration ${{ inputs.configuration }} --verbosity ${{ inputs.verbosity }}"
+        if [ "${{ inputs.use-lock-file }}" == "true" ]; then
+          RESTORE_ARGS="$RESTORE_ARGS --locked-mode"
+        fi
+        dotnet restore $RESTORE_ARGS
+
+    - name: Display restored packages
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: dotnet list package

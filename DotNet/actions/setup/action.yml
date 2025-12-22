@@ -1,0 +1,49 @@
+name: 'Setup .NET'
+description: 'Sets up .NET SDK and authentication'
+inputs:
+  dotnet-version:
+    description: '.NET SDK version to use'
+    required: true
+  azure-client-id:
+    description: 'Azure Client ID'
+    required: false
+  azure-tenant-id:
+    description: 'Azure Tenant ID'
+    required: false
+  azure-subscription-id:
+    description: 'Azure Subscription ID'
+    required: false
+  enable-caching:
+    description: 'Enable NuGet package caching'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+        cache: ${{ inputs.enable-caching == 'true' }}
+        cache-dependency-path: '**/packages.lock.json'
+
+    - name: Display .NET Version
+      shell: bash
+      run: dotnet --version
+
+    - name: Azure Login
+      if: inputs.azure-client-id != '' && inputs.azure-tenant-id != '' && inputs.azure-subscription-id != ''
+      uses: azure/login@v2
+      with:
+        client-id: ${{ inputs.azure-client-id }}
+        tenant-id: ${{ inputs.azure-tenant-id }}
+        subscription-id: ${{ inputs.azure-subscription-id }}
+
+    - name: Set Azure Environment Variables
+      if: inputs.azure-client-id != '' && inputs.azure-tenant-id != '' && inputs.azure-subscription-id != ''
+      shell: bash
+      run: |
+        echo "AZURE_SUBSCRIPTION_ID=${{ inputs.azure-subscription-id }}" >> $GITHUB_ENV
+        echo "AZURE_TENANT_ID=${{ inputs.azure-tenant-id }}" >> $GITHUB_ENV
+        echo "AZURE_CLIENT_ID=${{ inputs.azure-client-id }}" >> $GITHUB_ENV

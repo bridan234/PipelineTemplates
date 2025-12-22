@@ -1,0 +1,118 @@
+name: 'DotNet Publish'
+description: 'Publish .NET application for deployment'
+inputs:
+  working-directory:
+    description: 'Working directory for the project'
+    required: false
+    default: './'
+  configuration:
+    description: 'Build configuration (Debug or Release)'
+    required: false
+    default: 'Release'
+  runtime:
+    description: 'Target runtime (e.g., linux-x64, win-x64, osx-x64)'
+    required: false
+    default: ''
+  self-contained:
+    description: 'Publish as self-contained application'
+    required: false
+    default: 'false'
+  single-file:
+    description: 'Publish as single file'
+    required: false
+    default: 'false'
+  output-path:
+    description: 'Output directory for published files'
+    required: false
+    default: './publish'
+  no-build:
+    description: 'Skip build step if already done'
+    required: false
+    default: 'true'
+  trim-unused-code:
+    description: 'Trim unused code (for smaller deployments)'
+    required: false
+    default: 'false'
+  ready-to-run:
+    description: 'Enable ReadyToRun compilation'
+    required: false
+    default: 'false'
+
+outputs:
+  publish-path:
+    description: 'Path to published artifacts'
+    value: ${{ steps.publish.outputs.path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Publish application
+      id: publish
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        PUBLISH_ARGS="--configuration ${{ inputs.configuration }} --output ${{ inputs.output-path }}"
+        
+        if [ "${{ inputs.no-build }}" == "true" ]; then
+          PUBLISH_ARGS="$PUBLISH_ARGS --no-build"
+        fi
+        
+        if [ -n "${{ inputs.runtime }}" ]; then
+          PUBLISH_ARGS="$PUBLISH_ARGS --runtime ${{ inputs.runtime }}"
+        fi
+        
+        if [ "${{ inputs.self-contained }}" == "true" ]; then
+          PUBLISH_ARGS="$PUBLISH_ARGS --self-contained true"
+        else
+          PUBLISH_ARGS="$PUBLISH_ARGS --self-contained false"
+        fi
+        
+        if [ "${{ inputs.single-file }}" == "true" ]; then
+          PUBLISH_ARGS="$PUBLISH_ARGS -p:PublishSingleFile=true"
+        fi
+        
+        if [ "${{ inputs.trim-unused-code }}" == "true" ]; then
+          PUBLISH_ARGS="$PUBLISH_ARGS -p:PublishTrimmed=true"
+        fi
+        
+        if [ "${{ inputs.ready-to-run }}" == "true" ]; then
+          PUBLISH_ARGS="$PUBLISH_ARGS -p:PublishReadyToRun=true"
+        fi
+        
+        dotnet publish $PUBLISH_ARGS
+        
+        FULL_PATH="${{ inputs.working-directory }}/${{ inputs.output-path }}"
+        echo "path=$FULL_PATH" >> $GITHUB_OUTPUT
+        echo "✅ Published to: $FULL_PATH"
+
+    - name: Display published artifacts
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "Published artifacts:"
+        du -sh "${{ inputs.output-path }}"
+        ls -lh "${{ inputs.output-path }}"
+
+    - name: Create deployment package
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        cd "${{ inputs.output-path }}"
+        zip -r ../deployment-package.zip . -q
+        cd ..
+        echo "📦 Deployment package created: deployment-package.zip"
+        ls -lh deployment-package.zip
+
+    - name: Upload publish artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: publish-artifacts-${{ github.run_id }}
+        path: ${{ inputs.working-directory }}/${{ inputs.output-path }}
+        retention-days: 30
+
+    - name: Upload deployment package
+      uses: actions/upload-artifact@v4
+      with:
+        name: deployment-package-${{ github.run_id }}
+        path: ${{ inputs.working-directory }}/deployment-package.zip
+        retention-days: 30
