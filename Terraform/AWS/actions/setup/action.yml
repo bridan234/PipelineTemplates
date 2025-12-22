@@ -3,8 +3,7 @@ description: 'Sets up Terraform and AWS authentication'
 inputs:
   terraform-version:
     description: 'Terraform version to use'
-    required: false
-    default: '1.7.0'
+    required: true
   aws-region:
     description: 'AWS Region'
     required: true

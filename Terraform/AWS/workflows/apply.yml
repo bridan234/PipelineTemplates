@@ -9,9 +9,8 @@ on:
         type: string
       terraform-version:
         description: 'Terraform version'
-        required: false
+        required: true
         type: string
-        default: '1.7.0'
       working-directory:
         description: 'Working directory'
         required: false

@@ -96,7 +96,7 @@ jobs:
     uses: ./.github/workflows/terraform/azure/validate.yml
     with:
       environment: ${{ github.event.inputs.environment || 'staging' }}
-      terraform-version: '1.7.0'
+      terraform-version: ${{ vars.TERRAFORM_VERSION }}
       working-directory: './terraform'
       backend-resource-group: ${{ vars.BACKEND_RESOURCE_GROUP_NAME }}
       backend-storage-account: ${{ vars.BACKEND_STORAGE_ACCOUNT_NAME }}
@@ -116,7 +116,7 @@ jobs:
       environment: ${{ github.event.inputs.environment || 'staging' }}
       var-file: ${{ github.event.inputs.environment || 'staging' }}.tfvars
       destroy: ${{ github.event.inputs.action == 'destroy' }}
-      terraform-version: '1.7.0'
+      terraform-version: ${{ vars.TERRAFORM_VERSION }}
       working-directory: './terraform'
       backend-resource-group: ${{ vars.BACKEND_RESOURCE_GROUP_NAME }}
       backend-storage-account: ${{ vars.BACKEND_STORAGE_ACCOUNT_NAME }}
@@ -150,7 +150,7 @@ jobs:
     uses: ./.github/workflows/terraform/azure/apply.yml
     with:
       environment: ${{ github.event.inputs.environment }}
-      terraform-version: '1.7.0'
+      terraform-version: ${{ vars.TERRAFORM_VERSION }}
       working-directory: './terraform'
       backend-resource-group: ${{ vars.BACKEND_RESOURCE_GROUP_NAME }}
       backend-storage-account: ${{ vars.BACKEND_STORAGE_ACCOUNT_NAME }}

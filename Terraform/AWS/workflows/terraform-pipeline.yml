@@ -76,7 +76,7 @@ jobs:
     uses: ./.github/workflows/terraform/aws/validate.yml
     with:
       environment: ${{ github.event.inputs.environment || 'staging' }}
-      terraform-version: '1.7.0'
+      terraform-version: ${{ vars.TERRAFORM_VERSION }}
       working-directory: './terraform'
       aws-region: ${{ vars.AWS_REGION }}
       backend-bucket: ${{ vars.BACKEND_BUCKET }}
@@ -97,7 +97,7 @@ jobs:
       environment: ${{ github.event.inputs.environment || 'staging' }}
       var-file: ${{ github.event.inputs.environment || 'staging' }}.tfvars
       destroy: ${{ github.event.inputs.action == 'destroy' }}
-      terraform-version: '1.7.0'
+      terraform-version: ${{ vars.TERRAFORM_VERSION }}
       working-directory: './terraform'
       aws-region: ${{ vars.AWS_REGION }}
       backend-bucket: ${{ vars.BACKEND_BUCKET }}
@@ -132,7 +132,7 @@ jobs:
     uses: ./.github/workflows/terraform/aws/apply.yml
     with:
       environment: ${{ github.event.inputs.environment }}
-      terraform-version: '1.7.0'
+      terraform-version: ${{ vars.TERRAFORM_VERSION }}
       working-directory: './terraform'
       aws-region: ${{ vars.AWS_REGION }}
       backend-bucket: ${{ vars.BACKEND_BUCKET }}

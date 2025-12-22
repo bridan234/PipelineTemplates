@@ -76,7 +76,7 @@ jobs:
     uses: ./.github/workflows/terraform/gcp/validate.yml
     with:
       environment: ${{ github.event.inputs.environment || 'staging' }}
-      terraform-version: '1.7.0'
+      terraform-version: ${{ vars.TERRAFORM_VERSION }}
       working-directory: './terraform'
       gcp-project-id: ${{ vars.GCP_PROJECT_ID }}
       gcp-region: ${{ vars.GCP_REGION }}
@@ -96,7 +96,7 @@ jobs:
       environment: ${{ github.event.inputs.environment || 'staging' }}
       var-file: ${{ github.event.inputs.environment || 'staging' }}.tfvars
       destroy: ${{ github.event.inputs.action == 'destroy' }}
-      terraform-version: '1.7.0'
+      terraform-version: ${{ vars.TERRAFORM_VERSION }}
       working-directory: './terraform'
       gcp-project-id: ${{ vars.GCP_PROJECT_ID }}
       gcp-region: ${{ vars.GCP_REGION }}
@@ -130,7 +130,7 @@ jobs:
     uses: ./.github/workflows/terraform/gcp/apply.yml
     with:
       environment: ${{ github.event.inputs.environment }}
-      terraform-version: '1.7.0'
+      terraform-version: ${{ vars.TERRAFORM_VERSION }}
       working-directory: './terraform'
       gcp-project-id: ${{ vars.GCP_PROJECT_ID }}
       gcp-region: ${{ vars.GCP_REGION }}
