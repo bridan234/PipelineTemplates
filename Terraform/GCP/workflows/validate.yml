@@ -1,0 +1,104 @@
+name: Terraform Validate (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment name'
+        required: true
+        type: string
+      terraform-version:
+        description: 'Terraform version'
+        required: false
+        type: string
+        default: '1.7.0'
+      working-directory:
+        description: 'Working directory'
+        required: false
+        type: string
+        default: './terraform'
+      gcp-project-id:
+        description: 'GCP Project ID'
+        required: true
+        type: string
+      gcp-region:
+        description: 'GCP Region'
+        required: false
+        type: string
+        default: 'us-central1'
+      backend-bucket:
+        description: 'GCS bucket for state'
+        required: true
+        type: string
+      backend-prefix:
+        description: 'GCS prefix for state file'
+        required: true
+        type: string
+      pre-step:
+        description: 'Custom script to run before validation'
+        required: false
+        type: string
+        default: ''
+      post-step:
+        description: 'Custom script to run after validation'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      gcp-workload-identity-provider:
+        description: 'Workload Identity Provider for OIDC authentication'
+        required: false
+      gcp-service-account:
+        description: 'Service Account email for OIDC authentication'
+        required: false
+      gcp-credentials-json:
+        description: 'Service Account JSON key (alternative to OIDC)'
+        required: false
+
+jobs:
+  validate:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Templates
+        uses: actions/download-artifact@v4
+        with:
+          name: pipeline-templates-${{ github.run_id }}
+          path: .github/actions/terraform/gcp
+
+      - name: Pre-Validation Step
+        if: inputs.pre-step != ''
+        shell: bash
+        run: ${{ inputs.pre-step }}
+
+      - name: Setup Terraform & GCP
+        uses: ./.github/actions/terraform/gcp/setup
+        with:
+          terraform-version: ${{ inputs.terraform-version }}
+          gcp-project-id: ${{ inputs.gcp-project-id }}
+          gcp-region: ${{ inputs.gcp-region }}
+          gcp-workload-identity-provider: ${{ secrets.gcp-workload-identity-provider }}
+          gcp-service-account: ${{ secrets.gcp-service-account }}
+          gcp-credentials-json: ${{ secrets.gcp-credentials-json }}
+
+      - name: Terraform Init
+        uses: ./.github/actions/terraform/gcp/init
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          backend-bucket: ${{ inputs.backend-bucket }}
+          backend-prefix: ${{ inputs.backend-prefix }}
+
+      - name: Terraform Validate
+        uses: ./.github/actions/terraform/gcp/validate
+        with:
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Post-Validation Step
+        if: inputs.post-step != ''
+        shell: bash
+        run: ${{ inputs.post-step }}

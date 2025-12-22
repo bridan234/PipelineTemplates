@@ -1,0 +1,141 @@
+name: Terraform Pipeline
+
+on:
+  pull_request:
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform.yml'
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        default: 'plan'
+        options:
+          - validate
+          - plan
+          - apply
+          - destroy
+      pre-validate-step:
+        description: 'Custom script to run before validation (optional)'
+        required: false
+        type: string
+        default: ''
+      post-validate-step:
+        description: 'Custom script to run after validation (optional)'
+        required: false
+        type: string
+        default: ''
+      pre-plan-step:
+        description: 'Custom script to run before plan (optional)'
+        required: false
+        type: string
+        default: ''
+      post-plan-step:
+        description: 'Custom script to run after plan (optional)'
+        required: false
+        type: string
+        default: ''
+      pre-apply-step:
+        description: 'Custom script to run before apply (optional)'
+        required: false
+        type: string
+        default: ''
+      post-apply-step:
+        description: 'Custom script to run after apply (optional)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+  actions: write
+
+jobs:
+  # Step 1: Validate
+  validate:
+    name: Validate
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/terraform/gcp/validate.yml
+    with:
+      environment: ${{ github.event.inputs.environment || 'staging' }}
+      terraform-version: '1.7.0'
+      working-directory: './terraform'
+      gcp-project-id: ${{ vars.GCP_PROJECT_ID }}
+      gcp-region: ${{ vars.GCP_REGION }}
+      backend-bucket: ${{ vars.BACKEND_BUCKET }}
+      backend-prefix: ${{ vars.BACKEND_PREFIX }}
+      pre-step: ${{ github.event.inputs.pre-validate-step || '' }}
+      post-step: ${{ github.event.inputs.post-validate-step || '' }}
+    secrets: inherit  # Pass all secrets from parent workflow
+
+  # Step 2: Plan
+  plan:
+    name: Plan
+    needs: validate
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event.inputs.action == 'plan' || github.event.inputs.action == 'apply' || github.event.inputs.action == 'destroy'
+    uses: ./.github/workflows/terraform/gcp/plan.yml
+    with:
+      environment: ${{ github.event.inputs.environment || 'staging' }}
+      var-file: ${{ github.event.inputs.environment || 'staging' }}.tfvars
+      destroy: ${{ github.event.inputs.action == 'destroy' }}
+      terraform-version: '1.7.0'
+      working-directory: './terraform'
+      gcp-project-id: ${{ vars.GCP_PROJECT_ID }}
+      gcp-region: ${{ vars.GCP_REGION }}
+      backend-bucket: ${{ vars.BACKEND_BUCKET }}
+      backend-prefix: ${{ vars.BACKEND_PREFIX }}
+      pre-step: ${{ github.event.inputs.pre-plan-step || '' }}
+      post-step: ${{ github.event.inputs.post-plan-step || '' }}
+    secrets: inherit  # Pass all secrets from parent workflow
+
+  # Step 3: Approval (manual gate)
+  approve:
+    name: Approve
+    needs: plan
+    if: github.event_name != 'pull_request' && needs.plan.outputs.exitcode == '2' && (github.event.inputs.action == 'apply' || github.event.inputs.action == 'destroy')
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Approval Gate
+        run: |
+          if [ "${{ github.event.inputs.action }}" == "destroy" ]; then
+            echo "⚠️ Approved for DESTRUCTION"
+          else
+            echo "✅ Approved for deployment"
+          fi
+
+  # Step 4: Apply/Destroy
+  apply:
+    name: Apply
+    needs: [plan, approve]
+    if: github.event_name != 'pull_request' && needs.plan.outputs.exitcode == '2' && (github.event.inputs.action == 'apply' || github.event.inputs.action == 'destroy')
+    uses: ./.github/workflows/terraform/gcp/apply.yml
+    with:
+      environment: ${{ github.event.inputs.environment }}
+      terraform-version: '1.7.0'
+      working-directory: './terraform'
+      gcp-project-id: ${{ vars.GCP_PROJECT_ID }}
+      gcp-region: ${{ vars.GCP_REGION }}
+      backend-bucket: ${{ vars.BACKEND_BUCKET }}
+      backend-prefix: ${{ vars.BACKEND_PREFIX }}
+      pre-step: ${{ github.event.inputs.pre-apply-step || '' }}
+      post-step: ${{ github.event.inputs.post-apply-step || '' }}
+    secrets: inherit  # Pass all secrets from parent workflow

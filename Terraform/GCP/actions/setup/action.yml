@@ -1,0 +1,62 @@
+name: 'Setup Terraform'
+description: 'Sets up Terraform and GCP authentication'
+inputs:
+  terraform-version:
+    description: 'Terraform version to use'
+    required: false
+    default: '1.7.0'
+  gcp-project-id:
+    description: 'GCP Project ID'
+    required: true
+  gcp-region:
+    description: 'GCP Region'
+    required: false
+    default: 'us-central1'
+  gcp-workload-identity-provider:
+    description: 'Workload Identity Provider (for OIDC)'
+    required: false
+    default: ''
+  gcp-service-account:
+    description: 'Service Account email (for OIDC)'
+    required: false
+    default: ''
+  gcp-credentials-json:
+    description: 'Service Account JSON key (for static credentials)'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform-version }}
+
+    - name: Authenticate to GCP (Workload Identity)
+      if: inputs.gcp-workload-identity-provider != ''
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ inputs.gcp-workload-identity-provider }}
+        service_account: ${{ inputs.gcp-service-account }}
+        project_id: ${{ inputs.gcp-project-id }}
+
+    - name: Authenticate to GCP (Service Account Key)
+      if: inputs.gcp-workload-identity-provider == '' && inputs.gcp-credentials-json != ''
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ inputs.gcp-credentials-json }}
+        project_id: ${{ inputs.gcp-project-id }}
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+      with:
+        project_id: ${{ inputs.gcp-project-id }}
+
+    - name: Set GCP Environment Variables
+      shell: bash
+      run: |
+        echo "GOOGLE_PROJECT=${{ inputs.gcp-project-id }}" >> $GITHUB_ENV
+        echo "GOOGLE_REGION=${{ inputs.gcp-region }}" >> $GITHUB_ENV
+        echo "TF_VAR_project_id=${{ inputs.gcp-project-id }}" >> $GITHUB_ENV
+        echo "TF_VAR_region=${{ inputs.gcp-region }}" >> $GITHUB_ENV

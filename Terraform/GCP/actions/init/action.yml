@@ -1,0 +1,24 @@
+name: 'Terraform Init'
+description: 'Initialize Terraform with GCS backend'
+inputs:
+  working-directory:
+    description: 'Working directory for Terraform'
+    required: false
+    default: './terraform'
+  backend-bucket:
+    description: 'GCS bucket name for state storage'
+    required: true
+  backend-prefix:
+    description: 'GCS prefix (path) for state file'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Terraform Init
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        terraform init \
+          -backend-config="bucket=${{ inputs.backend-bucket }}" \
+          -backend-config="prefix=${{ inputs.backend-prefix }}"
