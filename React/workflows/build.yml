@@ -1,0 +1,171 @@
+name: React Build & Test (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version'
+        required: false
+        type: string
+        default: '20.x'
+      package-manager:
+        description: 'Package manager (npm, yarn, pnpm)'
+        required: false
+        type: string
+        default: 'npm'
+      working-directory:
+        description: 'Working directory'
+        required: false
+        type: string
+        default: './'
+      build-script:
+        description: 'Build script name'
+        required: false
+        type: string
+        default: 'build'
+      output-directory:
+        description: 'Build output directory'
+        required: false
+        type: string
+        default: 'build'
+      run-tests:
+        description: 'Run tests'
+        required: false
+        type: boolean
+        default: true
+      run-lint:
+        description: 'Run linting'
+        required: false
+        type: boolean
+        default: true
+      collect-coverage:
+        description: 'Collect code coverage'
+        required: false
+        type: boolean
+        default: true
+      coverage-threshold:
+        description: 'Minimum code coverage percentage'
+        required: false
+        type: string
+        default: '80'
+      env-file:
+        description: 'Environment file to use'
+        required: false
+        type: string
+        default: ''
+      public-url:
+        description: 'PUBLIC_URL for the application'
+        required: false
+        type: string
+        default: ''
+      generate-sourcemap:
+        description: 'Generate source maps'
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      build-version:
+        description: 'Build version'
+        value: ${{ jobs.build.outputs.version }}
+      test-result:
+        description: 'Test result'
+        value: ${{ jobs.test.outputs.result }}
+      coverage-percentage:
+        description: 'Coverage percentage'
+        value: ${{ jobs.test.outputs.coverage }}
+
+jobs:
+  lint:
+    name: Lint
+    if: inputs.run-lint == true
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js & Dependencies
+        uses: bridan234/PipelineTemplates/React/actions/setup@main
+        with:
+          node-version: ${{ inputs.node-version }}
+          package-manager: ${{ inputs.package-manager }}
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Lint Code
+        uses: bridan234/PipelineTemplates/React/actions/lint@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          package-manager: ${{ inputs.package-manager }}
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js & Dependencies
+        uses: bridan234/PipelineTemplates/React/actions/setup@main
+        with:
+          node-version: ${{ inputs.node-version }}
+          package-manager: ${{ inputs.package-manager }}
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Get version
+        id: version
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Version: $VERSION"
+
+      - name: Build Application
+        uses: bridan234/PipelineTemplates/React/actions/build@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          package-manager: ${{ inputs.package-manager }}
+          build-script: ${{ inputs.build-script }}
+          output-directory: ${{ inputs.output-directory }}
+          env-file: ${{ inputs.env-file }}
+          public-url: ${{ inputs.public-url }}
+          generate-sourcemap: ${{ inputs.generate-sourcemap }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ github.run_id }}
+          path: ${{ inputs.working-directory }}/${{ inputs.output-directory }}
+          retention-days: 7
+
+  test:
+    name: Test
+    needs: build
+    if: inputs.run-tests == true
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.test.outputs.test-result }}
+      coverage: ${{ steps.test.outputs.coverage-percentage }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js & Dependencies
+        uses: bridan234/PipelineTemplates/React/actions/setup@main
+        with:
+          node-version: ${{ inputs.node-version }}
+          package-manager: ${{ inputs.package-manager }}
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Run Tests
+        id: test
+        uses: bridan234/PipelineTemplates/React/actions/test@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          package-manager: ${{ inputs.package-manager }}
+          coverage: ${{ inputs.collect-coverage }}
+          coverage-threshold: ${{ inputs.coverage-threshold }}

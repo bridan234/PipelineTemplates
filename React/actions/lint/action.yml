@@ -1,0 +1,89 @@
+name: 'Lint React Application'
+description: 'Run ESLint and Prettier checks'
+
+inputs:
+  working-directory:
+    description: 'Working directory'
+    required: false
+    default: './'
+  package-manager:
+    description: 'Package manager (npm, yarn, pnpm)'
+    required: false
+    default: 'npm'
+  lint-script:
+    description: 'Lint script name'
+    required: false
+    default: 'lint'
+  format-check:
+    description: 'Check formatting with Prettier'
+    required: false
+    default: 'true'
+  fix:
+    description: 'Auto-fix issues'
+    required: false
+    default: 'false'
+
+outputs:
+  result:
+    description: 'Lint result (passed/failed)'
+    value: ${{ steps.lint.outputs.result }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run ESLint
+      id: lint
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "🔍 Running ESLint..."
+        
+        FIX_FLAG=""
+        if [ "${{ inputs.fix }}" == "true" ]; then
+          FIX_FLAG="--fix"
+        fi
+        
+        if [ "${{ inputs.package-manager }}" == "npm" ]; then
+          npm run ${{ inputs.lint-script }} -- $FIX_FLAG
+        elif [ "${{ inputs.package-manager }}" == "yarn" ]; then
+          yarn ${{ inputs.lint-script }} $FIX_FLAG
+        elif [ "${{ inputs.package-manager }}" == "pnpm" ]; then
+          pnpm run ${{ inputs.lint-script }} $FIX_FLAG
+        fi
+        
+        echo "result=passed" >> $GITHUB_OUTPUT
+        echo "✅ ESLint checks passed"
+
+    - name: Check formatting with Prettier
+      if: inputs.format-check == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "💅 Checking code formatting..."
+        
+        if [ "${{ inputs.package-manager }}" == "npm" ]; then
+          npx prettier --check "src/**/*.{js,jsx,ts,tsx,css,scss,json,md}"
+        elif [ "${{ inputs.package-manager }}" == "yarn" ]; then
+          yarn prettier --check "src/**/*.{js,jsx,ts,tsx,css,scss,json,md}"
+        elif [ "${{ inputs.package-manager }}" == "pnpm" ]; then
+          pnpm prettier --check "src/**/*.{js,jsx,ts,tsx,css,scss,json,md}"
+        fi
+        
+        echo "✅ Formatting checks passed"
+
+    - name: TypeScript type check
+      if: hashFiles(format('{0}/tsconfig.json', inputs.working-directory)) != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "🔎 Running TypeScript type check..."
+        
+        if [ "${{ inputs.package-manager }}" == "npm" ]; then
+          npx tsc --noEmit
+        elif [ "${{ inputs.package-manager }}" == "yarn" ]; then
+          yarn tsc --noEmit
+        elif [ "${{ inputs.package-manager }}" == "pnpm" ]; then
+          pnpm tsc --noEmit
+        fi
+        
+        echo "✅ TypeScript type check passed"

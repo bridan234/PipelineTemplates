@@ -1,0 +1,108 @@
+name: 'Setup Node.js & Dependencies'
+description: 'Setup Node.js environment and install dependencies with caching'
+
+inputs:
+  node-version:
+    description: 'Node.js version to use'
+    required: true
+  package-manager:
+    description: 'Package manager (npm, yarn, pnpm)'
+    required: false
+    default: 'npm'
+  working-directory:
+    description: 'Working directory'
+    required: false
+    default: './'
+  cache-dependency-path:
+    description: 'Path to package-lock.json, yarn.lock, or pnpm-lock.yaml'
+    required: false
+    default: '**/package-lock.json'
+  registry-url:
+    description: 'Optional registry URL'
+    required: false
+    default: ''
+  scope:
+    description: 'Optional scope for scoped packages'
+    required: false
+    default: ''
+
+outputs:
+  node-version:
+    description: 'Installed Node.js version'
+    value: ${{ steps.setup.outputs.node-version }}
+  cache-hit:
+    description: 'Whether cache was hit'
+    value: ${{ steps.cache.outputs.cache-hit }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      id: setup
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: ${{ inputs.package-manager }}
+        cache-dependency-path: ${{ inputs.cache-dependency-path }}
+        registry-url: ${{ inputs.registry-url }}
+        scope: ${{ inputs.scope }}
+
+    - name: Install pnpm
+      if: inputs.package-manager == 'pnpm'
+      shell: bash
+      run: npm install -g pnpm
+
+    - name: Install Yarn
+      if: inputs.package-manager == 'yarn'
+      shell: bash
+      run: npm install -g yarn
+
+    - name: Get package manager version
+      id: pm-version
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [ "${{ inputs.package-manager }}" == "npm" ]; then
+          echo "version=$(npm --version)" >> $GITHUB_OUTPUT
+        elif [ "${{ inputs.package-manager }}" == "yarn" ]; then
+          echo "version=$(yarn --version)" >> $GITHUB_OUTPUT
+        elif [ "${{ inputs.package-manager }}" == "pnpm" ]; then
+          echo "version=$(pnpm --version)" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Cache node_modules
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ inputs.working-directory }}/node_modules
+          ~/.npm
+          ~/.yarn
+          ~/.pnpm-store
+        key: ${{ runner.os }}-${{ inputs.package-manager }}-${{ hashFiles(inputs.cache-dependency-path) }}
+        restore-keys: |
+          ${{ runner.os }}-${{ inputs.package-manager }}-
+
+    - name: Install dependencies
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [ "${{ inputs.package-manager }}" == "npm" ]; then
+          npm ci
+        elif [ "${{ inputs.package-manager }}" == "yarn" ]; then
+          yarn install --frozen-lockfile
+        elif [ "${{ inputs.package-manager }}" == "pnpm" ]; then
+          pnpm install --frozen-lockfile
+        fi
+
+    - name: Display versions
+      shell: bash
+      run: |
+        echo "Node.js: $(node --version)"
+        echo "npm: $(npm --version)"
+        if [ "${{ inputs.package-manager }}" == "yarn" ]; then
+          echo "yarn: $(yarn --version)"
+        elif [ "${{ inputs.package-manager }}" == "pnpm" ]; then
+          echo "pnpm: $(pnpm --version)"
+        fi

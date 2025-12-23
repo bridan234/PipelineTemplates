@@ -1,0 +1,238 @@
+name: React Deploy (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment name'
+        required: true
+        type: string
+      node-version:
+        description: 'Node.js version'
+        required: false
+        type: string
+        default: '20.x'
+      package-manager:
+        description: 'Package manager (npm, yarn, pnpm)'
+        required: false
+        type: string
+        default: 'npm'
+      working-directory:
+        description: 'Working directory'
+        required: false
+        type: string
+        default: './'
+      build-script:
+        description: 'Build script name'
+        required: false
+        type: string
+        default: 'build'
+      output-directory:
+        description: 'Build output directory'
+        required: false
+        type: string
+        default: 'build'
+      deployment-type:
+        description: 'Deployment type (s3, azure-blob, netlify, vercel, cloudflare-pages, github-pages)'
+        required: true
+        type: string
+      env-file:
+        description: 'Environment file to use'
+        required: false
+        type: string
+        default: ''
+      public-url:
+        description: 'PUBLIC_URL for the application'
+        required: false
+        type: string
+        default: ''
+      # AWS S3
+      s3-bucket:
+        description: 'S3 bucket name'
+        required: false
+        type: string
+        default: ''
+      cloudfront-distribution-id:
+        description: 'CloudFront distribution ID'
+        required: false
+        type: string
+        default: ''
+      # Azure
+      azure-storage-account:
+        description: 'Azure storage account name'
+        required: false
+        type: string
+        default: ''
+      azure-cdn-profile:
+        description: 'Azure CDN profile name'
+        required: false
+        type: string
+        default: ''
+      azure-cdn-endpoint:
+        description: 'Azure CDN endpoint name'
+        required: false
+        type: string
+        default: ''
+      # Netlify
+      netlify-site-id:
+        description: 'Netlify site ID'
+        required: false
+        type: string
+        default: ''
+      # Vercel
+      vercel-org-id:
+        description: 'Vercel organization ID'
+        required: false
+        type: string
+        default: ''
+      vercel-project-id:
+        description: 'Vercel project ID'
+        required: false
+        type: string
+        default: ''
+      # Cloudflare
+      cloudflare-account-id:
+        description: 'Cloudflare account ID'
+        required: false
+        type: string
+        default: ''
+      cloudflare-project-name:
+        description: 'Cloudflare project name'
+        required: false
+        type: string
+        default: ''
+      # GitHub Pages
+      cname:
+        description: 'Custom domain for GitHub Pages'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      # AWS
+      aws-access-key-id:
+        required: false
+      aws-secret-access-key:
+        required: false
+      aws-role-arn:
+        required: false
+      # Azure
+      azure-client-id:
+        required: false
+      azure-tenant-id:
+        required: false
+      azure-subscription-id:
+        required: false
+      # Netlify
+      netlify-auth-token:
+        required: false
+      # Vercel
+      vercel-token:
+        required: false
+      # Cloudflare
+      cloudflare-api-token:
+        required: false
+    outputs:
+      deployment-url:
+        description: 'URL of deployed application'
+        value: ${{ jobs.deploy.outputs.url }}
+
+jobs:
+  build:
+    name: Build for Deployment
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js & Dependencies
+        uses: bridan234/PipelineTemplates/React/actions/setup@main
+        with:
+          node-version: ${{ inputs.node-version }}
+          package-manager: ${{ inputs.package-manager }}
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Build Application
+        uses: bridan234/PipelineTemplates/React/actions/build@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          package-manager: ${{ inputs.package-manager }}
+          build-script: ${{ inputs.build-script }}
+          output-directory: ${{ inputs.output-directory }}
+          env-file: ${{ inputs.env-file }}
+          public-url: ${{ inputs.public-url }}
+          node-env: 'production'
+          generate-sourcemap: 'false'
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ inputs.environment }}-${{ github.run_id }}
+          path: ${{ inputs.working-directory }}/${{ inputs.output-directory }}
+          retention-days: 7
+
+  deploy:
+    name: Deploy to ${{ inputs.environment }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    outputs:
+      url: ${{ steps.deploy.outputs.deployment-url }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-${{ inputs.environment }}-${{ github.run_id }}
+          path: ${{ inputs.working-directory }}/${{ inputs.output-directory }}
+
+      - name: Configure AWS Credentials
+        if: inputs.deployment-type == 's3'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.aws-access-key-id }}
+          aws-secret-access-key: ${{ secrets.aws-secret-access-key }}
+          aws-region: us-east-1
+          role-to-assume: ${{ secrets.aws-role-arn }}
+
+      - name: Azure Login
+        if: inputs.deployment-type == 'azure-blob'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.azure-client-id }}
+          tenant-id: ${{ secrets.azure-tenant-id }}
+          subscription-id: ${{ secrets.azure-subscription-id }}
+
+      - name: Deploy Application
+        id: deploy
+        uses: bridan234/PipelineTemplates/React/actions/deploy@main
+        with:
+          deployment-type: ${{ inputs.deployment-type }}
+          build-directory: ${{ inputs.output-directory }}
+          working-directory: ${{ inputs.working-directory }}
+          s3-bucket: ${{ inputs.s3-bucket }}
+          cloudfront-distribution-id: ${{ inputs.cloudfront-distribution-id }}
+          azure-storage-account: ${{ inputs.azure-storage-account }}
+          azure-cdn-profile: ${{ inputs.azure-cdn-profile }}
+          azure-cdn-endpoint: ${{ inputs.azure-cdn-endpoint }}
+          netlify-site-id: ${{ inputs.netlify-site-id }}
+          netlify-auth-token: ${{ secrets.netlify-auth-token }}
+          vercel-token: ${{ secrets.vercel-token }}
+          vercel-org-id: ${{ inputs.vercel-org-id }}
+          vercel-project-id: ${{ inputs.vercel-project-id }}
+          cloudflare-account-id: ${{ inputs.cloudflare-account-id }}
+          cloudflare-project-name: ${{ inputs.cloudflare-project-name }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cname: ${{ inputs.cname }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.cloudflare-api-token }}
+
+      - name: Deployment Summary
+        shell: bash
+        run: |
+          echo "✅ Deployment completed successfully"
+          echo "🌐 Application URL: ${{ steps.deploy.outputs.deployment-url }}"

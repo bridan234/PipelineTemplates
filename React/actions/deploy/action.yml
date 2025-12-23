@@ -1,0 +1,231 @@
+name: 'Deploy React Application'
+description: 'Deploy React application to various platforms'
+
+inputs:
+  deployment-type:
+    description: 'Deployment type (s3, azure-blob, netlify, vercel, cloudflare-pages, github-pages)'
+    required: true
+  build-directory:
+    description: 'Build directory to deploy'
+    required: false
+    default: 'build'
+  working-directory:
+    description: 'Working directory'
+    required: false
+    default: './'
+  # AWS S3
+  s3-bucket:
+    description: 'S3 bucket name'
+    required: false
+    default: ''
+  s3-region:
+    description: 'S3 bucket region'
+    required: false
+    default: 'us-east-1'
+  cloudfront-distribution-id:
+    description: 'CloudFront distribution ID for cache invalidation'
+    required: false
+    default: ''
+  # Azure Blob Storage
+  azure-storage-account:
+    description: 'Azure storage account name'
+    required: false
+    default: ''
+  azure-container:
+    description: 'Azure blob container name'
+    required: false
+    default: '$web'
+  azure-cdn-profile:
+    description: 'Azure CDN profile name for cache purge'
+    required: false
+    default: ''
+  azure-cdn-endpoint:
+    description: 'Azure CDN endpoint name for cache purge'
+    required: false
+    default: ''
+  # Netlify
+  netlify-site-id:
+    description: 'Netlify site ID'
+    required: false
+    default: ''
+  netlify-auth-token:
+    description: 'Netlify auth token'
+    required: false
+    default: ''
+  # Vercel
+  vercel-token:
+    description: 'Vercel token'
+    required: false
+    default: ''
+  vercel-org-id:
+    description: 'Vercel organization ID'
+    required: false
+    default: ''
+  vercel-project-id:
+    description: 'Vercel project ID'
+    required: false
+    default: ''
+  # Cloudflare Pages
+  cloudflare-account-id:
+    description: 'Cloudflare account ID'
+    required: false
+    default: ''
+  cloudflare-project-name:
+    description: 'Cloudflare Pages project name'
+    required: false
+    default: ''
+  # GitHub Pages
+  github-token:
+    description: 'GitHub token for Pages deployment'
+    required: false
+    default: ''
+  cname:
+    description: 'Custom domain for GitHub Pages'
+    required: false
+    default: ''
+
+outputs:
+  deployment-url:
+    description: 'URL of deployed application'
+    value: ${{ steps.deploy.outputs.url }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Deploy to AWS S3
+      id: deploy-s3
+      if: inputs.deployment-type == 's3'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "☁️ Deploying to AWS S3..."
+        
+        aws s3 sync ${{ inputs.build-directory }}/ s3://${{ inputs.s3-bucket }}/ \
+          --delete \
+          --cache-control "public, max-age=31536000, immutable" \
+          --exclude "*.html" \
+          --exclude "service-worker.js" \
+          --exclude "asset-manifest.json"
+        
+        aws s3 sync ${{ inputs.build-directory }}/ s3://${{ inputs.s3-bucket }}/ \
+          --cache-control "public, max-age=0, must-revalidate" \
+          --exclude "*" \
+          --include "*.html" \
+          --include "service-worker.js" \
+          --include "asset-manifest.json"
+        
+        if [ -n "${{ inputs.cloudfront-distribution-id }}" ]; then
+          echo "🔄 Invalidating CloudFront cache..."
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ inputs.cloudfront-distribution-id }} \
+            --paths "/*"
+        fi
+        
+        URL="https://${{ inputs.s3-bucket }}.s3.${{ inputs.s3-region }}.amazonaws.com"
+        echo "url=$URL" >> $GITHUB_OUTPUT
+        echo "✅ Deployed to S3: $URL"
+
+    - name: Deploy to Azure Blob Storage
+      id: deploy-azure
+      if: inputs.deployment-type == 'azure-blob'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "☁️ Deploying to Azure Blob Storage..."
+        
+        az storage blob upload-batch \
+          --account-name ${{ inputs.azure-storage-account }} \
+          --destination ${{ inputs.azure-container }} \
+          --source ${{ inputs.build-directory }} \
+          --overwrite \
+          --content-cache-control "public, max-age=31536000, immutable" \
+          --pattern "*.js" "*.css" "*.woff*" "*.ttf" "*.otf" "*.eot"
+        
+        az storage blob upload-batch \
+          --account-name ${{ inputs.azure-storage-account }} \
+          --destination ${{ inputs.azure-container }} \
+          --source ${{ inputs.build-directory }} \
+          --overwrite \
+          --content-cache-control "public, max-age=0, must-revalidate" \
+          --pattern "*.html"
+        
+        if [ -n "${{ inputs.azure-cdn-profile }}" ] && [ -n "${{ inputs.azure-cdn-endpoint }}" ]; then
+          echo "🔄 Purging Azure CDN cache..."
+          az cdn endpoint purge \
+            --resource-group $(az storage account show --name ${{ inputs.azure-storage-account }} --query resourceGroup -o tsv) \
+            --profile-name ${{ inputs.azure-cdn-profile }} \
+            --name ${{ inputs.azure-cdn-endpoint }} \
+            --content-paths "/*"
+        fi
+        
+        URL="https://${{ inputs.azure-storage-account }}.z13.web.core.windows.net"
+        echo "url=$URL" >> $GITHUB_OUTPUT
+        echo "✅ Deployed to Azure: $URL"
+
+    - name: Deploy to Netlify
+      id: deploy-netlify
+      if: inputs.deployment-type == 'netlify'
+      uses: netlify/actions/cli@master
+      with:
+        args: deploy --dir=${{ inputs.working-directory }}/${{ inputs.build-directory }} --site=${{ inputs.netlify-site-id }} --prod
+      env:
+        NETLIFY_AUTH_TOKEN: ${{ inputs.netlify-auth-token }}
+        NETLIFY_SITE_ID: ${{ inputs.netlify-site-id }}
+
+    - name: Deploy to Vercel
+      id: deploy-vercel
+      if: inputs.deployment-type == 'vercel'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "☁️ Deploying to Vercel..."
+        
+        npx vercel deploy \
+          --token=${{ inputs.vercel-token }} \
+          --prod \
+          --yes \
+          ${{ inputs.build-directory }}
+        
+        echo "✅ Deployed to Vercel"
+
+    - name: Deploy to Cloudflare Pages
+      id: deploy-cloudflare
+      if: inputs.deployment-type == 'cloudflare-pages'
+      uses: cloudflare/pages-action@v1
+      with:
+        apiToken: ${{ env.CLOUDFLARE_API_TOKEN }}
+        accountId: ${{ inputs.cloudflare-account-id }}
+        projectName: ${{ inputs.cloudflare-project-name }}
+        directory: ${{ inputs.working-directory }}/${{ inputs.build-directory }}
+        gitHubToken: ${{ inputs.github-token }}
+
+    - name: Deploy to GitHub Pages
+      id: deploy-github-pages
+      if: inputs.deployment-type == 'github-pages'
+      uses: peaceiris/actions-gh-pages@v4
+      with:
+        github_token: ${{ inputs.github-token }}
+        publish_dir: ${{ inputs.working-directory }}/${{ inputs.build-directory }}
+        cname: ${{ inputs.cname }}
+
+    - name: Set deployment output
+      id: deploy
+      shell: bash
+      run: |
+        if [ "${{ inputs.deployment-type }}" == "s3" ]; then
+          echo "url=${{ steps.deploy-s3.outputs.url }}" >> $GITHUB_OUTPUT
+        elif [ "${{ inputs.deployment-type }}" == "azure-blob" ]; then
+          echo "url=${{ steps.deploy-azure.outputs.url }}" >> $GITHUB_OUTPUT
+        elif [ "${{ inputs.deployment-type }}" == "netlify" ]; then
+          echo "url=https://${{ inputs.netlify-site-id }}.netlify.app" >> $GITHUB_OUTPUT
+        elif [ "${{ inputs.deployment-type }}" == "vercel" ]; then
+          echo "url=https://vercel.app" >> $GITHUB_OUTPUT
+        elif [ "${{ inputs.deployment-type }}" == "cloudflare-pages" ]; then
+          echo "url=https://${{ inputs.cloudflare-project-name }}.pages.dev" >> $GITHUB_OUTPUT
+        elif [ "${{ inputs.deployment-type }}" == "github-pages" ]; then
+          if [ -n "${{ inputs.cname }}" ]; then
+            echo "url=https://${{ inputs.cname }}" >> $GITHUB_OUTPUT
+          else
+            echo "url=https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}" >> $GITHUB_OUTPUT
+          fi
+        fi

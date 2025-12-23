@@ -1,0 +1,132 @@
+name: 'Build React Application'
+description: 'Build React application with environment variables and optimization'
+
+inputs:
+  working-directory:
+    description: 'Working directory'
+    required: false
+    default: './'
+  package-manager:
+    description: 'Package manager (npm, yarn, pnpm)'
+    required: false
+    default: 'npm'
+  build-script:
+    description: 'Build script name'
+    required: false
+    default: 'build'
+  output-directory:
+    description: 'Build output directory'
+    required: false
+    default: 'build'
+  env-file:
+    description: 'Environment file to use (.env.production, .env.staging, etc.)'
+    required: false
+    default: ''
+  node-env:
+    description: 'NODE_ENV value'
+    required: false
+    default: 'production'
+  public-url:
+    description: 'PUBLIC_URL for the application'
+    required: false
+    default: ''
+  generate-sourcemap:
+    description: 'Generate source maps'
+    required: false
+    default: 'false'
+  skip-preflight-check:
+    description: 'Skip preflight check'
+    required: false
+    default: 'false'
+
+outputs:
+  build-path:
+    description: 'Path to build output'
+    value: ${{ steps.build.outputs.path }}
+  build-size:
+    description: 'Build size in bytes'
+    value: ${{ steps.stats.outputs.size }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup environment variables
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "NODE_ENV=${{ inputs.node-env }}" >> $GITHUB_ENV
+        
+        if [ -n "${{ inputs.public-url }}" ]; then
+          echo "PUBLIC_URL=${{ inputs.public-url }}" >> $GITHUB_ENV
+        fi
+        
+        if [ "${{ inputs.generate-sourcemap }}" == "false" ]; then
+          echo "GENERATE_SOURCEMAP=false" >> $GITHUB_ENV
+        fi
+        
+        if [ "${{ inputs.skip-preflight-check }}" == "true" ]; then
+          echo "SKIP_PREFLIGHT_CHECK=true" >> $GITHUB_ENV
+        fi
+        
+        if [ -n "${{ inputs.env-file }}" ] && [ -f "${{ inputs.env-file }}" ]; then
+          echo "Loading environment from ${{ inputs.env-file }}"
+          cat "${{ inputs.env-file }}" >> $GITHUB_ENV
+        fi
+
+    - name: Build application
+      id: build
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "🏗️ Building React application..."
+        
+        if [ "${{ inputs.package-manager }}" == "npm" ]; then
+          npm run ${{ inputs.build-script }}
+        elif [ "${{ inputs.package-manager }}" == "yarn" ]; then
+          yarn ${{ inputs.build-script }}
+        elif [ "${{ inputs.package-manager }}" == "pnpm" ]; then
+          pnpm run ${{ inputs.build-script }}
+        fi
+        
+        echo "path=${{ inputs.working-directory }}/${{ inputs.output-directory }}" >> $GITHUB_OUTPUT
+        echo "✅ Build completed successfully"
+
+    - name: Verify build output
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [ ! -d "${{ inputs.output-directory }}" ]; then
+          echo "❌ Build directory not found: ${{ inputs.output-directory }}"
+          exit 1
+        fi
+        
+        if [ ! -f "${{ inputs.output-directory }}/index.html" ]; then
+          echo "❌ index.html not found in build directory"
+          exit 1
+        fi
+        
+        echo "✅ Build output verified"
+
+    - name: Build statistics
+      id: stats
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        BUILD_SIZE=$(du -sb ${{ inputs.output-directory }} | cut -f1)
+        BUILD_SIZE_MB=$(echo "scale=2; $BUILD_SIZE / 1048576" | bc)
+        
+        echo "size=$BUILD_SIZE" >> $GITHUB_OUTPUT
+        echo "📊 Build size: ${BUILD_SIZE_MB}MB"
+        
+        echo "📁 Build contents:"
+        ls -lh ${{ inputs.output-directory }}/
+
+    - name: Display bundle analysis
+      if: hashFiles(format('{0}/{1}/asset-manifest.json', inputs.working-directory, inputs.output-directory)) != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "📦 Asset manifest found, analyzing bundle..."
+        if [ -f "${{ inputs.output-directory }}/asset-manifest.json" ]; then
+          cat ${{ inputs.output-directory }}/asset-manifest.json
+        fi

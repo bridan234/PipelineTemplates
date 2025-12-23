@@ -1,0 +1,124 @@
+name: 'Test React Application'
+description: 'Run tests with coverage reporting'
+
+inputs:
+  working-directory:
+    description: 'Working directory'
+    required: false
+    default: './'
+  package-manager:
+    description: 'Package manager (npm, yarn, pnpm)'
+    required: false
+    default: 'npm'
+  test-script:
+    description: 'Test script name'
+    required: false
+    default: 'test'
+  coverage:
+    description: 'Collect code coverage'
+    required: false
+    default: 'true'
+  coverage-threshold:
+    description: 'Minimum coverage percentage'
+    required: false
+    default: '80'
+  watch:
+    description: 'Run tests in watch mode'
+    required: false
+    default: 'false'
+  max-workers:
+    description: 'Maximum number of workers'
+    required: false
+    default: '50%'
+
+outputs:
+  test-result:
+    description: 'Test result (passed/failed)'
+    value: ${{ steps.test.outputs.result }}
+  coverage-percentage:
+    description: 'Coverage percentage'
+    value: ${{ steps.coverage.outputs.percentage }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run tests
+      id: test
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "🧪 Running tests..."
+        
+        export CI=true
+        
+        if [ "${{ inputs.coverage }}" == "true" ]; then
+          COVERAGE_FLAG="--coverage --coverageReporters=text --coverageReporters=lcov"
+        else
+          COVERAGE_FLAG=""
+        fi
+        
+        if [ "${{ inputs.watch }}" == "false" ]; then
+          WATCH_FLAG="--watchAll=false"
+        else
+          WATCH_FLAG=""
+        fi
+        
+        MAX_WORKERS_FLAG="--maxWorkers=${{ inputs.max-workers }}"
+        
+        if [ "${{ inputs.package-manager }}" == "npm" ]; then
+          npm run ${{ inputs.test-script }} -- $WATCH_FLAG $COVERAGE_FLAG $MAX_WORKERS_FLAG
+        elif [ "${{ inputs.package-manager }}" == "yarn" ]; then
+          yarn ${{ inputs.test-script }} $WATCH_FLAG $COVERAGE_FLAG $MAX_WORKERS_FLAG
+        elif [ "${{ inputs.package-manager }}" == "pnpm" ]; then
+          pnpm run ${{ inputs.test-script }} $WATCH_FLAG $COVERAGE_FLAG $MAX_WORKERS_FLAG
+        fi
+        
+        echo "result=passed" >> $GITHUB_OUTPUT
+        echo "✅ Tests passed"
+
+    - name: Check coverage threshold
+      id: coverage
+      if: inputs.coverage == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [ -f "coverage/lcov.info" ]; then
+          echo "📊 Coverage report generated"
+          
+          # Extract coverage percentage from lcov-report
+          if [ -f "coverage/lcov-report/index.html" ]; then
+            COVERAGE=$(grep -oP 'div class="fl pad1y space-right2">\K[0-9.]+' coverage/lcov-report/index.html | head -1)
+            echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
+            echo "📈 Coverage: ${COVERAGE}%"
+            
+            THRESHOLD=${{ inputs.coverage-threshold }}
+            if (( $(echo "$COVERAGE < $THRESHOLD" | bc -l) )); then
+              echo "❌ Coverage ${COVERAGE}% is below threshold ${THRESHOLD}%"
+              exit 1
+            else
+              echo "✅ Coverage ${COVERAGE}% meets threshold ${THRESHOLD}%"
+            fi
+          fi
+        else
+          echo "⚠️ Coverage file not found"
+          echo "percentage=0" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Upload coverage reports
+      if: inputs.coverage == 'true' && hashFiles(format('{0}/coverage/lcov.info', inputs.working-directory)) != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report-${{ github.run_id }}
+        path: ${{ inputs.working-directory }}/coverage/
+        retention-days: 7
+
+    - name: Test summary
+      shell: bash
+      run: |
+        echo "## Test Results 🧪" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **Status:** ${{ steps.test.outputs.result }}" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ inputs.coverage }}" == "true" ]; then
+          echo "- **Coverage:** ${{ steps.coverage.outputs.percentage }}%" >> $GITHUB_STEP_SUMMARY
+          echo "- **Threshold:** ${{ inputs.coverage-threshold }}%" >> $GITHUB_STEP_SUMMARY
+        fi
