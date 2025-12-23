@@ -1,0 +1,133 @@
+name: Docker Build Workflow
+
+on:
+  workflow_call:
+    inputs:
+      context:
+        description: 'Build context path'
+        required: false
+        type: string
+        default: '.'
+      dockerfile:
+        description: 'Path to Dockerfile'
+        required: false
+        type: string
+        default: 'Dockerfile'
+      image-name:
+        description: 'Docker image name (without tags)'
+        required: true
+        type: string
+      tags:
+        description: 'Image tags (comma-separated)'
+        required: false
+        type: string
+        default: 'latest'
+      build-args:
+        description: 'Build arguments (newline-separated)'
+        required: false
+        type: string
+        default: ''
+      target:
+        description: 'Target build stage for multi-stage builds'
+        required: false
+        type: string
+        default: ''
+      platforms:
+        description: 'Target platforms (comma-separated)'
+        required: false
+        type: string
+        default: 'linux/amd64'
+      registry:
+        description: 'Container registry (dockerhub, ghcr, ecr, acr)'
+        required: false
+        type: string
+        default: 'dockerhub'
+      registry-url:
+        description: 'Custom registry URL'
+        required: false
+        type: string
+        default: ''
+      enable-cache:
+        description: 'Enable build cache'
+        required: false
+        type: boolean
+        default: true
+      enable-qemu:
+        description: 'Enable QEMU for multi-platform builds'
+        required: false
+        type: boolean
+        default: false
+      provenance:
+        description: 'Generate provenance attestation'
+        required: false
+        type: boolean
+        default: false
+      sbom:
+        description: 'Generate SBOM attestation'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      registry-username:
+        description: 'Registry username'
+        required: false
+      registry-password:
+        description: 'Registry password or token'
+        required: false
+    outputs:
+      image-tags:
+        description: 'Built image tags'
+        value: ${{ jobs.build.outputs.image-tags }}
+      digest:
+        description: 'Image digest'
+        value: ${{ jobs.build.outputs.digest }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image-tags: ${{ steps.build.outputs.image-tags }}
+      digest: ${{ steps.build.outputs.digest }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Docker
+        uses: bridan234/PipelineTemplates/Docker/actions/setup@main
+        with:
+          registry: ${{ inputs.registry }}
+          registry-url: ${{ inputs.registry-url }}
+          username: ${{ secrets.registry-username }}
+          password: ${{ secrets.registry-password }}
+          buildx-install: 'true'
+          qemu-install: ${{ inputs.enable-qemu }}
+
+      - name: Build Docker image
+        id: build
+        uses: bridan234/PipelineTemplates/Docker/actions/build@main
+        with:
+          context: ${{ inputs.context }}
+          dockerfile: ${{ inputs.dockerfile }}
+          image-name: ${{ inputs.image-name }}
+          tags: ${{ inputs.tags }}
+          build-args: ${{ inputs.build-args }}
+          target: ${{ inputs.target }}
+          platforms: ${{ inputs.platforms }}
+          cache-from: ${{ inputs.enable-cache && 'type=gha' || '' }}
+          cache-to: ${{ inputs.enable-cache && 'type=gha,mode=max' || '' }}
+          load: ${{ inputs.platforms == 'linux/amd64' }}
+          push: 'false'
+          provenance: ${{ inputs.provenance }}
+          sbom: ${{ inputs.sbom }}
+
+      - name: Display build summary
+        run: |
+          echo "### ✅ Docker Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`${{ inputs.image-name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags:** \`${{ inputs.tags }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platforms:** \`${{ inputs.platforms }}\`" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ inputs.target }}" ]; then
+            echo "**Target Stage:** \`${{ inputs.target }}\`" >> $GITHUB_STEP_SUMMARY
+          fi

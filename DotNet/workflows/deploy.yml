@@ -101,15 +101,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download Templates
-        uses: actions/download-artifact@v4
-        with:
-          name: pipeline-templates-${{ github.run_id }}
-          path: .github/actions/dotnet
-        continue-on-error: true
-
       - name: Setup .NET & Azure
-        uses: ./.github/actions/dotnet/setup
+        uses: bridan234/PipelineTemplates/DotNet/actions/setup@main
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
           azure-client-id: ${{ secrets.azure-client-id }}
@@ -118,13 +111,13 @@ jobs:
           enable-caching: 'true'
 
       - name: Restore Dependencies
-        uses: ./.github/actions/dotnet/restore
+        uses: bridan234/PipelineTemplates/DotNet/actions/restore@main
         with:
           working-directory: ${{ inputs.working-directory }}
           configuration: ${{ inputs.configuration }}
 
       - name: Build Project
-        uses: ./.github/actions/dotnet/build
+        uses: bridan234/PipelineTemplates/DotNet/actions/build@main
         with:
           working-directory: ${{ inputs.working-directory }}
           configuration: ${{ inputs.configuration }}
@@ -137,7 +130,7 @@ jobs:
         run: ${{ inputs.pre-publish-step }}
 
       - name: Publish Application
-        uses: ./.github/actions/dotnet/publish
+        uses: bridan234/PipelineTemplates/DotNet/actions/publish@main
         with:
           working-directory: ${{ inputs.working-directory }}
           configuration: ${{ inputs.configuration }}
@@ -163,13 +156,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download Templates
-        uses: actions/download-artifact@v4
-        with:
-          name: pipeline-templates-${{ github.run_id }}
-          path: .github/actions/dotnet
-        continue-on-error: true
-
       - name: Setup Azure
         uses: azure/login@v2
         with:
@@ -184,7 +170,7 @@ jobs:
 
       - name: Deploy to Azure
         id: deploy
-        uses: ./.github/actions/dotnet/deploy
+        uses: bridan234/PipelineTemplates/DotNet/actions/deploy@main
         with:
           deployment-type: ${{ inputs.deployment-type }}
           app-name: ${{ inputs.app-name }}

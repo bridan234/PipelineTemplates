@@ -121,29 +121,9 @@ env:
   CONFIGURATION: 'Release'
 
 jobs:
-  # Step 0: Setup - Download templates once for all workflows
-  setup:
-    name: Download Templates
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Templates
-        uses: actions/checkout@v4
-        with:
-          repository: 'your-org/pipeline-templates'
-          ref: 'main'
-          path: .pipeline-templates
-
-      - name: Upload Templates
-        uses: actions/upload-artifact@v4
-        with:
-          name: pipeline-templates-${{ github.run_id }}
-          path: .pipeline-templates/DotNet/actions
-          retention-days: 1
-
   # Step 1: Build & Test
   build:
     name: Build & Test
-    needs: [setup]
     if: |
       github.event_name == 'pull_request' || 
       github.event_name == 'push' || 
@@ -169,7 +149,7 @@ jobs:
   # Step 2: Security Scan
   security-scan:
     name: Security Scan
-    needs: [setup, build]
+    needs: [build]
     if: |
       github.event_name == 'pull_request' || 
       github.event_name == 'push' || 
@@ -191,7 +171,7 @@ jobs:
   # Step 3: Code Quality Analysis
   code-quality:
     name: Code Quality
-    needs: [setup, build]
+    needs: [build]
     if: |
       github.event_name == 'pull_request' || 
       github.event_name == 'push'

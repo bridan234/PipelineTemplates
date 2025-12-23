@@ -60,19 +60,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download Templates
-        uses: actions/download-artifact@v4
-        with:
-          name: pipeline-templates-${{ github.run_id }}
-          path: .github/actions/terraform/azure
-
       - name: Pre-Validation Step
         if: inputs.pre-step != ''
         shell: bash
         run: ${{ inputs.pre-step }}
 
       - name: Setup Terraform & Azure
-        uses: ./.github/actions/terraform/azure/setup
+        uses: bridan234/PipelineTemplates/Terraform/Azure/actions/setup@main
         with:
           terraform-version: ${{ inputs.terraform-version }}
           azure-client-id: ${{ secrets.azure-client-id }}
@@ -80,7 +74,7 @@ jobs:
           azure-subscription-id: ${{ secrets.azure-subscription-id }}
 
       - name: Terraform Init
-        uses: ./.github/actions/terraform/azure/init
+        uses: bridan234/PipelineTemplates/Terraform/Azure/actions/init@main
         with:
           working-directory: ${{ inputs.working-directory }}
           backend-resource-group: ${{ inputs.backend-resource-group }}
@@ -89,7 +83,7 @@ jobs:
           backend-key: ${{ inputs.backend-key }}
 
       - name: Terraform Validate
-        uses: ./.github/actions/terraform/azure/validate
+        uses: bridan234/PipelineTemplates/Terraform/Azure/actions/validate@main
         with:
           working-directory: ${{ inputs.working-directory }}
 

@@ -85,19 +85,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download Templates
-        uses: actions/download-artifact@v4
-        with:
-          name: pipeline-templates-${{ github.run_id }}
-          path: .github/actions/terraform/aws
-
       - name: Pre-Plan Step
         if: inputs.pre-step != ''
         shell: bash
         run: ${{ inputs.pre-step }}
 
       - name: Setup Terraform & AWS
-        uses: ./.github/actions/terraform/aws/setup
+        uses: bridan234/PipelineTemplates/Terraform/AWS/actions/setup@main
         with:
           terraform-version: ${{ inputs.terraform-version }}
           aws-region: ${{ inputs.aws-region }}
@@ -106,7 +100,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.aws-secret-access-key }}
 
       - name: Terraform Init
-        uses: ./.github/actions/terraform/aws/init
+        uses: bridan234/PipelineTemplates/Terraform/AWS/actions/init@main
         with:
           working-directory: ${{ inputs.working-directory }}
           backend-bucket: ${{ inputs.backend-bucket }}
@@ -116,7 +110,7 @@ jobs:
 
       - name: Terraform Plan
         id: plan
-        uses: ./.github/actions/terraform/aws/plan
+        uses: bridan234/PipelineTemplates/Terraform/AWS/actions/plan@main
         with:
           working-directory: ${{ inputs.working-directory }}
           var-file: ${{ inputs.var-file }}

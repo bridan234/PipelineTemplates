@@ -69,29 +69,9 @@ permissions:
   actions: write
 
 jobs:
-  # Step 0: Setup - Download templates once for all workflows
-  setup:
-    name: Download Templates
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Templates
-        uses: actions/checkout@v4
-        with:
-          repository: 'your-org/pipeline-templates'
-          ref: 'main'
-          path: .pipeline-templates
-
-      - name: Upload Templates
-        uses: actions/upload-artifact@v4
-        with:
-          name: pipeline-templates-${{ github.run_id }}
-          path: .pipeline-templates/Terraform/Azure/actions
-          retention-days: 1
-
   # Step 1: Validate
   validate:
     name: Validate
-    needs: [setup]
     if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/terraform/azure/validate.yml
     with:

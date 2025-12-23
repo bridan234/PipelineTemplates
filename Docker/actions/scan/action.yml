@@ -1,0 +1,177 @@
+name: 'Docker Scan'
+description: 'Scan Docker images for vulnerabilities and security issues'
+inputs:
+  image-name:
+    description: 'Docker image name with tag to scan'
+    required: true
+  scanner:
+    description: 'Vulnerability scanner to use (trivy, snyk, grype)'
+    required: false
+    default: 'trivy'
+  severity:
+    description: 'Minimum severity level to report (UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL)'
+    required: false
+    default: 'MEDIUM'
+  fail-on-severity:
+    description: 'Fail the build if vulnerabilities of this severity or higher are found'
+    required: false
+    default: 'CRITICAL'
+  scan-type:
+    description: 'Type of scan (vuln, config, secret, all)'
+    required: false
+    default: 'vuln'
+  output-format:
+    description: 'Output format (table, json, sarif, cyclonedx, spdx)'
+    required: false
+    default: 'table'
+  output-file:
+    description: 'Output file path for scan results'
+    required: false
+    default: ''
+  ignore-unfixed:
+    description: 'Ignore unfixed vulnerabilities'
+    required: false
+    default: 'false'
+  upload-sarif:
+    description: 'Upload SARIF results to GitHub Security tab'
+    required: false
+    default: 'false'
+  snyk-token:
+    description: 'Snyk API token (required when using snyk scanner)'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        if [ "${{ inputs.scanner }}" == "snyk" ] && [ -z "${{ inputs.snyk-token }}" ]; then
+          echo "::error::Snyk token is required when using Snyk scanner"
+          exit 1
+        fi
+
+    - name: Scan with Trivy
+      if: inputs.scanner == 'trivy'
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ inputs.image-name }}
+        format: ${{ inputs.output-format }}
+        output: ${{ inputs.output-file }}
+        severity: ${{ inputs.severity }}
+        exit-code: ${{ inputs.fail-on-severity != '' && '1' || '0' }}
+        vuln-type: ${{ inputs.scan-type == 'vuln' && 'os,library' || '' }}
+        scanners: ${{ inputs.scan-type == 'all' && 'vuln,config,secret' || inputs.scan-type }}
+        ignore-unfixed: ${{ inputs.ignore-unfixed }}
+      shell: bash
+
+    - name: Install Grype
+      if: inputs.scanner == 'grype'
+      shell: bash
+      run: |
+        curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+
+    - name: Scan with Grype
+      if: inputs.scanner == 'grype'
+      shell: bash
+      run: |
+        OUTPUT_FILE="${{ inputs.output-file }}"
+        OUTPUT_FORMAT="${{ inputs.output-format }}"
+        
+        # Set output options
+        OUTPUT_OPTS=""
+        if [ -n "$OUTPUT_FILE" ]; then
+          OUTPUT_OPTS="-o $OUTPUT_FORMAT=$OUTPUT_FILE"
+        else
+          OUTPUT_OPTS="-o $OUTPUT_FORMAT"
+        fi
+        
+        # Run Grype scan
+        grype "${{ inputs.image-name }}" \
+          $OUTPUT_OPTS \
+          --fail-on "${{ inputs.fail-on-severity }}" \
+          ${{ inputs.ignore-unfixed == 'true' && '--only-fixed' || '' }}
+
+    - name: Setup Snyk
+      if: inputs.scanner == 'snyk'
+      shell: bash
+      run: |
+        npm install -g snyk
+        snyk auth ${{ inputs.snyk-token }}
+
+    - name: Scan with Snyk
+      if: inputs.scanner == 'snyk'
+      shell: bash
+      run: |
+        OUTPUT_FILE="${{ inputs.output-file }}"
+        OUTPUT_FORMAT="${{ inputs.output-format }}"
+        
+        # Set output options
+        OUTPUT_OPTS=""
+        if [ -n "$OUTPUT_FILE" ]; then
+          case "$OUTPUT_FORMAT" in
+            json)
+              OUTPUT_OPTS="--json --json-file-output=$OUTPUT_FILE"
+              ;;
+            sarif)
+              OUTPUT_OPTS="--sarif --sarif-file-output=$OUTPUT_FILE"
+              ;;
+            *)
+              OUTPUT_OPTS=""
+              ;;
+          esac
+        fi
+        
+        # Run Snyk scan
+        snyk container test "${{ inputs.image-name }}" \
+          --severity-threshold=${{ inputs.fail-on-severity }} \
+          $OUTPUT_OPTS \
+          ${{ inputs.ignore-unfixed == 'true' && '--exclude-base-image-vulns' || '' }}
+
+    - name: Upload SARIF to GitHub Security
+      if: inputs.upload-sarif == 'true' && (inputs.output-format == 'sarif' || inputs.scanner == 'trivy')
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.output-file != '' && inputs.output-file || 'trivy-results.sarif' }}
+        category: ${{ inputs.scanner }}-container-scan
+      shell: bash
+
+    - name: Generate scan summary
+      if: always()
+      shell: bash
+      run: |
+        echo "### 🔍 Container Security Scan Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Image:** \`${{ inputs.image-name }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Scanner:** ${{ inputs.scanner }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Minimum Severity:** ${{ inputs.severity }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Fail on Severity:** ${{ inputs.fail-on-severity }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -n "${{ inputs.output-file }}" ] && [ -f "${{ inputs.output-file }}" ]; then
+          echo "**Scan results saved to:** \`${{ inputs.output-file }}\`" >> $GITHUB_STEP_SUMMARY
+          
+          # Try to add summary info if JSON format
+          if [ "${{ inputs.output-format }}" == "json" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "See artifacts for detailed results." >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
+
+    - name: Upload scan results as artifact
+      if: inputs.output-file != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.scanner }}-scan-results
+        path: ${{ inputs.output-file }}
+        retention-days: 30
+      shell: bash
+
+outputs:
+  scan-completed:
+    description: 'Whether the scan completed successfully'
+    value: 'true'
+  output-file:
+    description: 'Path to the scan results file'
+    value: ${{ inputs.output-file }}

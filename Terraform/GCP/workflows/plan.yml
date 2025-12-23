@@ -80,19 +80,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download Templates
-        uses: actions/download-artifact@v4
-        with:
-          name: pipeline-templates-${{ github.run_id }}
-          path: .github/actions/terraform/gcp
-
       - name: Pre-Plan Step
         if: inputs.pre-step != ''
         shell: bash
         run: ${{ inputs.pre-step }}
 
       - name: Setup Terraform & GCP
-        uses: ./.github/actions/terraform/gcp/setup
+        uses: bridan234/PipelineTemplates/Terraform/GCP/actions/setup@main
         with:
           terraform-version: ${{ inputs.terraform-version }}
           gcp-project-id: ${{ inputs.gcp-project-id }}
@@ -102,7 +96,7 @@ jobs:
           gcp-credentials-json: ${{ secrets.gcp-credentials-json }}
 
       - name: Terraform Init
-        uses: ./.github/actions/terraform/gcp/init
+        uses: bridan234/PipelineTemplates/Terraform/GCP/actions/init@main
         with:
           working-directory: ${{ inputs.working-directory }}
           backend-bucket: ${{ inputs.backend-bucket }}
@@ -110,7 +104,7 @@ jobs:
 
       - name: Terraform Plan
         id: plan
-        uses: ./.github/actions/terraform/gcp/plan
+        uses: bridan234/PipelineTemplates/Terraform/GCP/actions/plan@main
         with:
           working-directory: ${{ inputs.working-directory }}
           var-file: ${{ inputs.var-file }}

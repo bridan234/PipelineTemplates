@@ -1,0 +1,89 @@
+name: Docker Scan Workflow
+
+on:
+  workflow_call:
+    inputs:
+      image-name:
+        description: 'Docker image name with tag to scan'
+        required: true
+        type: string
+      scanner:
+        description: 'Vulnerability scanner to use (trivy, snyk, grype)'
+        required: false
+        type: string
+        default: 'trivy'
+      severity:
+        description: 'Minimum severity level to report'
+        required: false
+        type: string
+        default: 'MEDIUM'
+      fail-on-severity:
+        description: 'Fail if vulnerabilities of this severity or higher are found'
+        required: false
+        type: string
+        default: 'CRITICAL'
+      scan-type:
+        description: 'Type of scan (vuln, config, secret, all)'
+        required: false
+        type: string
+        default: 'vuln'
+      output-format:
+        description: 'Output format (table, json, sarif, cyclonedx, spdx)'
+        required: false
+        type: string
+        default: 'sarif'
+      ignore-unfixed:
+        description: 'Ignore unfixed vulnerabilities'
+        required: false
+        type: boolean
+        default: false
+      upload-sarif:
+        description: 'Upload SARIF results to GitHub Security tab'
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      snyk-token:
+        description: 'Snyk API token (required when using snyk scanner)'
+        required: false
+    outputs:
+      scan-completed:
+        description: 'Whether the scan completed successfully'
+        value: ${{ jobs.scan.outputs.scan-completed }}
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write  # Required for uploading SARIF results
+    outputs:
+      scan-completed: ${{ steps.scan.outputs.scan-completed }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Scan Docker image
+        id: scan
+        uses: bridan234/PipelineTemplates/Docker/actions/scan@main
+        with:
+          image-name: ${{ inputs.image-name }}
+          scanner: ${{ inputs.scanner }}
+          severity: ${{ inputs.severity }}
+          fail-on-severity: ${{ inputs.fail-on-severity }}
+          scan-type: ${{ inputs.scan-type }}
+          output-format: ${{ inputs.output-format }}
+          output-file: ${{ inputs.scanner }}-results.${{ inputs.output-format }}
+          ignore-unfixed: ${{ inputs.ignore-unfixed }}
+          upload-sarif: ${{ inputs.upload-sarif }}
+          snyk-token: ${{ secrets.snyk-token }}
+
+      - name: Display scan summary
+        if: always()
+        run: |
+          echo "### 🔍 Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Scanner:** ${{ inputs.scanner }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`${{ inputs.image-name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY

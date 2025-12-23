@@ -1,0 +1,153 @@
+name: 'Docker Build'
+description: 'Build Docker images with multi-stage and multi-platform support'
+inputs:
+  context:
+    description: 'Build context path'
+    required: false
+    default: '.'
+  dockerfile:
+    description: 'Path to Dockerfile'
+    required: false
+    default: 'Dockerfile'
+  image-name:
+    description: 'Docker image name (without tags)'
+    required: true
+  tags:
+    description: 'Image tags (comma-separated)'
+    required: false
+    default: 'latest'
+  build-args:
+    description: 'Build arguments (newline-separated, e.g., ARG1=value1)'
+    required: false
+    default: ''
+  target:
+    description: 'Target build stage for multi-stage builds'
+    required: false
+    default: ''
+  platforms:
+    description: 'Target platforms (comma-separated, e.g., linux/amd64,linux/arm64)'
+    required: false
+    default: 'linux/amd64'
+  cache-from:
+    description: 'Cache source (e.g., type=gha or type=registry,ref=...)'
+    required: false
+    default: 'type=gha'
+  cache-to:
+    description: 'Cache destination (e.g., type=gha,mode=max)'
+    required: false
+    default: 'type=gha,mode=max'
+  load:
+    description: 'Load image to Docker daemon (cannot be used with multiple platforms)'
+    required: false
+    default: 'true'
+  push:
+    description: 'Push image to registry'
+    required: false
+    default: 'false'
+  labels:
+    description: 'Image labels (newline-separated)'
+    required: false
+    default: ''
+  secrets:
+    description: 'Build secrets (newline-separated, e.g., id=mysecret,src=/path/to/secret)'
+    required: false
+    default: ''
+  provenance:
+    description: 'Generate provenance attestation'
+    required: false
+    default: 'false'
+  sbom:
+    description: 'Generate SBOM attestation'
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Prepare build tags
+      id: meta
+      shell: bash
+      run: |
+        IMAGE_NAME="${{ inputs.image-name }}"
+        TAGS="${{ inputs.tags }}"
+        
+        # Convert comma-separated tags to full image references
+        FULL_TAGS=""
+        IFS=',' read -ra TAG_ARRAY <<< "$TAGS"
+        for tag in "${TAG_ARRAY[@]}"; do
+          tag=$(echo "$tag" | xargs)  # trim whitespace
+          if [ -n "$FULL_TAGS" ]; then
+            FULL_TAGS="$FULL_TAGS,"
+          fi
+          FULL_TAGS="$FULL_TAGS${IMAGE_NAME}:${tag}"
+        done
+        
+        echo "tags=$FULL_TAGS" >> $GITHUB_OUTPUT
+        echo "Building image with tags: $FULL_TAGS"
+
+    - name: Prepare build metadata
+      id: build-meta
+      shell: bash
+      run: |
+        # Add standard labels if not provided
+        LABELS="${{ inputs.labels }}"
+        if [ -z "$LABELS" ]; then
+          LABELS="org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          LABELS="$LABELS"$'\n'"org.opencontainers.image.revision=${{ github.sha }}"
+          LABELS="$LABELS"$'\n'"org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}"
+        fi
+        
+        # Save to file for multiline handling
+        echo "$LABELS" > /tmp/labels.txt
+        echo "labels-file=/tmp/labels.txt" >> $GITHUB_OUTPUT
+
+    - name: Build Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ${{ inputs.context }}
+        file: ${{ inputs.dockerfile }}
+        tags: ${{ steps.meta.outputs.tags }}
+        target: ${{ inputs.target }}
+        platforms: ${{ inputs.platforms }}
+        build-args: ${{ inputs.build-args }}
+        cache-from: ${{ inputs.cache-from }}
+        cache-to: ${{ inputs.cache-to }}
+        load: ${{ inputs.load }}
+        push: ${{ inputs.push }}
+        labels: ${{ inputs.labels }}
+        secrets: ${{ inputs.secrets }}
+        provenance: ${{ inputs.provenance }}
+        sbom: ${{ inputs.sbom }}
+      shell: bash
+
+    - name: Display image info
+      if: inputs.load == 'true' && inputs.platforms == 'linux/amd64'
+      shell: bash
+      run: |
+        echo "### Built Image Information"
+        
+        # Get the first tag for inspection
+        FIRST_TAG=$(echo "${{ steps.meta.outputs.tags }}" | cut -d',' -f1)
+        
+        if docker image inspect "$FIRST_TAG" > /dev/null 2>&1; then
+          echo "Image: $FIRST_TAG"
+          docker image inspect "$FIRST_TAG" --format='Size: {{.Size}} bytes ({{ printf "%.2f" (div (float64 .Size) 1048576) }} MB)'
+          docker image inspect "$FIRST_TAG" --format='Architecture: {{.Architecture}}'
+          docker image inspect "$FIRST_TAG" --format='OS: {{.Os}}'
+          docker image inspect "$FIRST_TAG" --format='Created: {{.Created}}'
+          
+          # List all tags for this image
+          echo ""
+          echo "All tags:"
+          echo "${{ steps.meta.outputs.tags }}" | tr ',' '\n'
+        else
+          echo "Image not loaded to local daemon (may have been pushed directly)"
+        fi
+
+outputs:
+  image-tags:
+    description: 'Full image tags that were built'
+    value: ${{ steps.meta.outputs.tags }}
+  digest:
+    description: 'Image digest'
+    value: ${{ steps.build.outputs.digest }}

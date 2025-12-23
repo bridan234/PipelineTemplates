@@ -1,0 +1,95 @@
+name: Docker Push Workflow
+
+on:
+  workflow_call:
+    inputs:
+      image-name:
+        description: 'Docker image name (without tags)'
+        required: true
+        type: string
+      tags:
+        description: 'Image tags to push (comma-separated)'
+        required: false
+        type: string
+        default: 'latest'
+      source-tag:
+        description: 'Source tag if retagging before push'
+        required: false
+        type: string
+        default: ''
+      registry:
+        description: 'Target registry (dockerhub, ghcr, ecr, acr)'
+        required: false
+        type: string
+        default: 'dockerhub'
+      registry-url:
+        description: 'Custom registry URL'
+        required: false
+        type: string
+        default: ''
+      aws-region:
+        description: 'AWS region for ECR'
+        required: false
+        type: string
+        default: 'us-east-1'
+      additional-tags:
+        description: 'Additional tags to apply (comma-separated)'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      registry-username:
+        description: 'Registry username'
+        required: false
+      registry-password:
+        description: 'Registry password or token'
+        required: false
+    outputs:
+      pushed-tags:
+        description: 'List of pushed image tags'
+        value: ${{ jobs.push.outputs.pushed-tags }}
+      registry-url:
+        description: 'Registry URL'
+        value: ${{ jobs.push.outputs.registry-url }}
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    outputs:
+      pushed-tags: ${{ steps.push.outputs.pushed-tags }}
+      registry-url: ${{ steps.push.outputs.registry-url }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Docker
+        uses: bridan234/PipelineTemplates/Docker/actions/setup@main
+        with:
+          registry: ${{ inputs.registry }}
+          registry-url: ${{ inputs.registry-url }}
+          username: ${{ secrets.registry-username }}
+          password: ${{ secrets.registry-password }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Push Docker image
+        id: push
+        uses: bridan234/PipelineTemplates/Docker/actions/push@main
+        with:
+          image-name: ${{ inputs.image-name }}
+          tags: ${{ inputs.tags }}
+          source-tag: ${{ inputs.source-tag }}
+          registry: ${{ inputs.registry }}
+          registry-url: ${{ inputs.registry-url }}
+          additional-tags: ${{ inputs.additional-tags }}
+
+      - name: Display push summary
+        run: |
+          echo "### ✅ Docker Push Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Registry:** \`${{ steps.push.outputs.registry-url }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Pushed Tags:**" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.push.outputs.pushed-tags }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

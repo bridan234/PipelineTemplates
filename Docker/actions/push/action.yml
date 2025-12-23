@@ -1,0 +1,177 @@
+name: 'Docker Push'
+description: 'Push Docker images to container registries'
+inputs:
+  image-name:
+    description: 'Docker image name (without tags)'
+    required: true
+  tags:
+    description: 'Image tags to push (comma-separated)'
+    required: false
+    default: 'latest'
+  source-tag:
+    description: 'Source tag if retagging before push (optional)'
+    required: false
+    default: ''
+  registry:
+    description: 'Target registry (dockerhub, ghcr, ecr, acr, or custom)'
+    required: false
+    default: 'dockerhub'
+  registry-url:
+    description: 'Custom registry URL (required for ACR and custom registries)'
+    required: false
+    default: ''
+  additional-tags:
+    description: 'Additional tags to apply (comma-separated, e.g., sha-${GITHUB_SHA::7})'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Determine registry configuration
+      id: registry-config
+      shell: bash
+      run: |
+        REGISTRY_URL="${{ inputs.registry-url }}"
+        REGISTRY_PREFIX=""
+        
+        if [ -z "$REGISTRY_URL" ]; then
+          case "${{ inputs.registry }}" in
+            dockerhub)
+              REGISTRY_URL="docker.io"
+              REGISTRY_PREFIX=""
+              ;;
+            ghcr)
+              REGISTRY_URL="ghcr.io"
+              REGISTRY_PREFIX="ghcr.io/"
+              ;;
+            ecr)
+              # ECR URL should be determined from setup action
+              REGISTRY_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+              REGISTRY_PREFIX="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/"
+              ;;
+            acr)
+              echo "::error::ACR registry URL must be provided"
+              exit 1
+              ;;
+            custom)
+              echo "::error::Custom registry URL must be provided"
+              exit 1
+              ;;
+            *)
+              echo "::error::Unsupported registry: ${{ inputs.registry }}"
+              exit 1
+              ;;
+          esac
+        else
+          REGISTRY_PREFIX="${REGISTRY_URL}/"
+        fi
+        
+        echo "registry-url=$REGISTRY_URL" >> $GITHUB_OUTPUT
+        echo "registry-prefix=$REGISTRY_PREFIX" >> $GITHUB_OUTPUT
+        echo "Using registry: $REGISTRY_URL"
+
+    - name: Prepare image tags
+      id: prepare-tags
+      shell: bash
+      run: |
+        IMAGE_NAME="${{ inputs.image-name }}"
+        TAGS="${{ inputs.tags }}"
+        ADDITIONAL_TAGS="${{ inputs.additional-tags }}"
+        REGISTRY_PREFIX="${{ steps.registry-config.outputs.registry-prefix }}"
+        
+        # Combine tags and additional tags
+        ALL_TAGS="$TAGS"
+        if [ -n "$ADDITIONAL_TAGS" ]; then
+          ALL_TAGS="$ALL_TAGS,$ADDITIONAL_TAGS"
+        fi
+        
+        # Build full tag list
+        TAG_LIST=""
+        IFS=',' read -ra TAG_ARRAY <<< "$ALL_TAGS"
+        for tag in "${TAG_ARRAY[@]}"; do
+          tag=$(echo "$tag" | xargs)  # trim whitespace
+          FULL_TAG="${REGISTRY_PREFIX}${IMAGE_NAME}:${tag}"
+          
+          if [ -n "$TAG_LIST" ]; then
+            TAG_LIST="$TAG_LIST"$'\n'
+          fi
+          TAG_LIST="$TAG_LIST$FULL_TAG"
+        done
+        
+        echo "tag-list<<EOF" >> $GITHUB_OUTPUT
+        echo "$TAG_LIST" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+        echo "Will push the following tags:"
+        echo "$TAG_LIST"
+
+    - name: Tag images for push
+      shell: bash
+      run: |
+        SOURCE_TAG="${{ inputs.source-tag }}"
+        IMAGE_NAME="${{ inputs.image-name }}"
+        
+        # Determine source image
+        if [ -n "$SOURCE_TAG" ]; then
+          SOURCE_IMAGE="${IMAGE_NAME}:${SOURCE_TAG}"
+        else
+          # Use first tag from inputs as source
+          FIRST_TAG=$(echo "${{ inputs.tags }}" | cut -d',' -f1 | xargs)
+          SOURCE_IMAGE="${IMAGE_NAME}:${FIRST_TAG}"
+        fi
+        
+        echo "Source image: $SOURCE_IMAGE"
+        
+        # Tag all target images
+        while IFS= read -r target_tag; do
+          if [ -n "$target_tag" ]; then
+            echo "Tagging: $target_tag"
+            docker tag "$SOURCE_IMAGE" "$target_tag"
+          fi
+        done <<< "${{ steps.prepare-tags.outputs.tag-list }}"
+
+    - name: Push images
+      shell: bash
+      run: |
+        echo "Pushing images to registry..."
+        
+        PUSH_FAILED=0
+        while IFS= read -r image_tag; do
+          if [ -n "$image_tag" ]; then
+            echo "Pushing: $image_tag"
+            if docker push "$image_tag"; then
+              echo "✓ Successfully pushed: $image_tag"
+            else
+              echo "✗ Failed to push: $image_tag"
+              PUSH_FAILED=1
+            fi
+          fi
+        done <<< "${{ steps.prepare-tags.outputs.tag-list }}"
+        
+        if [ $PUSH_FAILED -eq 1 ]; then
+          echo "::error::One or more image pushes failed"
+          exit 1
+        fi
+        
+        echo "All images pushed successfully!"
+
+    - name: Generate push summary
+      shell: bash
+      run: |
+        echo "### Docker Push Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Registry:** ${{ steps.registry-config.outputs.registry-url }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Pushed Images:**" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        echo "${{ steps.prepare-tags.outputs.tag-list }}" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+
+outputs:
+  pushed-tags:
+    description: 'List of pushed image tags'
+    value: ${{ steps.prepare-tags.outputs.tag-list }}
+  registry-url:
+    description: 'Registry URL where images were pushed'
+    value: ${{ steps.registry-config.outputs.registry-url }}

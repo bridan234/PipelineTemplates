@@ -89,15 +89,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download Templates
-        uses: actions/download-artifact@v4
-        with:
-          name: pipeline-templates-${{ github.run_id }}
-          path: .github/actions/dotnet
-        continue-on-error: true
-
       - name: Setup .NET
-        uses: ./.github/actions/dotnet/setup
+        uses: bridan234/PipelineTemplates/DotNet/actions/setup@main
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
           enable-caching: 'true'
@@ -109,7 +102,7 @@ jobs:
         run: ${{ inputs.pre-restore-step }}
 
       - name: Restore Dependencies
-        uses: ./.github/actions/dotnet/restore
+        uses: bridan234/PipelineTemplates/DotNet/actions/restore@main
         with:
           working-directory: ${{ inputs.working-directory }}
           configuration: ${{ inputs.configuration }}
@@ -128,7 +121,7 @@ jobs:
 
       - name: Build Project
         id: build
-        uses: ./.github/actions/dotnet/build
+        uses: bridan234/PipelineTemplates/DotNet/actions/build@main
         with:
           working-directory: ${{ inputs.working-directory }}
           configuration: ${{ inputs.configuration }}
@@ -155,27 +148,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download Templates
-        uses: actions/download-artifact@v4
-        with:
-          name: pipeline-templates-${{ github.run_id }}
-          path: .github/actions/dotnet
-        continue-on-error: true
-
       - name: Setup .NET
-        uses: ./.github/actions/dotnet/setup
+        uses: bridan234/PipelineTemplates/DotNet/actions/setup@main
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
           enable-caching: 'true'
 
       - name: Restore Dependencies
-        uses: ./.github/actions/dotnet/restore
+        uses: bridan234/PipelineTemplates/DotNet/actions/restore@main
         with:
           working-directory: ${{ inputs.working-directory }}
           configuration: ${{ inputs.configuration }}
 
       - name: Build Project
-        uses: ./.github/actions/dotnet/build
+        uses: bridan234/PipelineTemplates/DotNet/actions/build@main
         with:
           working-directory: ${{ inputs.working-directory }}
           configuration: ${{ inputs.configuration }}
@@ -189,7 +175,7 @@ jobs:
 
       - name: Run Tests
         id: test
-        uses: ./.github/actions/dotnet/test
+        uses: bridan234/PipelineTemplates/DotNet/actions/test@main
         with:
           working-directory: ${{ inputs.working-directory }}
           configuration: ${{ inputs.configuration }}

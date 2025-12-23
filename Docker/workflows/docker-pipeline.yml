@@ -1,0 +1,307 @@
+name: Docker Complete Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      # Build inputs
+      context:
+        description: 'Build context path'
+        required: false
+        type: string
+        default: '.'
+      dockerfile:
+        description: 'Path to Dockerfile'
+        required: false
+        type: string
+        default: 'Dockerfile'
+      image-name:
+        description: 'Docker image name (without registry or tags)'
+        required: true
+        type: string
+      tags:
+        description: 'Image tags (comma-separated)'
+        required: false
+        type: string
+        default: 'latest'
+      build-args:
+        description: 'Build arguments (newline-separated)'
+        required: false
+        type: string
+        default: ''
+      target:
+        description: 'Target build stage for multi-stage builds'
+        required: false
+        type: string
+        default: ''
+      platforms:
+        description: 'Target platforms (comma-separated)'
+        required: false
+        type: string
+        default: 'linux/amd64'
+      
+      # Registry inputs
+      registry:
+        description: 'Container registry (dockerhub, ghcr, ecr, acr)'
+        required: false
+        type: string
+        default: 'dockerhub'
+      registry-url:
+        description: 'Custom registry URL'
+        required: false
+        type: string
+        default: ''
+      aws-region:
+        description: 'AWS region for ECR'
+        required: false
+        type: string
+        default: 'us-east-1'
+      
+      # Pipeline options
+      enable-cache:
+        description: 'Enable build cache'
+        required: false
+        type: boolean
+        default: true
+      enable-qemu:
+        description: 'Enable QEMU for multi-platform builds'
+        required: false
+        type: boolean
+        default: false
+      enable-scan:
+        description: 'Enable security scanning'
+        required: false
+        type: boolean
+        default: true
+      enable-push:
+        description: 'Enable pushing to registry'
+        required: false
+        type: boolean
+        default: true
+      provenance:
+        description: 'Generate provenance attestation'
+        required: false
+        type: boolean
+        default: false
+      sbom:
+        description: 'Generate SBOM attestation'
+        required: false
+        type: boolean
+        default: false
+      
+      # Scan inputs
+      scanner:
+        description: 'Vulnerability scanner to use (trivy, snyk, grype)'
+        required: false
+        type: string
+        default: 'trivy'
+      scan-severity:
+        description: 'Minimum severity level to report'
+        required: false
+        type: string
+        default: 'MEDIUM'
+      fail-on-severity:
+        description: 'Fail if vulnerabilities of this severity or higher are found'
+        required: false
+        type: string
+        default: 'CRITICAL'
+      upload-sarif:
+        description: 'Upload SARIF results to GitHub Security tab'
+        required: false
+        type: boolean
+        default: true
+    
+    secrets:
+      registry-username:
+        description: 'Registry username'
+        required: false
+      registry-password:
+        description: 'Registry password or token'
+        required: false
+      snyk-token:
+        description: 'Snyk API token (required when using snyk scanner)'
+        required: false
+    
+    outputs:
+      image-tags:
+        description: 'Built and pushed image tags'
+        value: ${{ jobs.push.outputs.pushed-tags }}
+      registry-url:
+        description: 'Registry URL'
+        value: ${{ jobs.push.outputs.registry-url }}
+      scan-completed:
+        description: 'Whether security scan completed'
+        value: ${{ jobs.scan.outputs.scan-completed }}
+
+jobs:
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    outputs:
+      image-tags: ${{ steps.build.outputs.image-tags }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Docker
+        uses: bridan234/PipelineTemplates/Docker/actions/setup@main
+        with:
+          registry: ${{ inputs.registry }}
+          registry-url: ${{ inputs.registry-url }}
+          username: ${{ secrets.registry-username }}
+          password: ${{ secrets.registry-password }}
+          aws-region: ${{ inputs.aws-region }}
+          buildx-install: 'true'
+          qemu-install: ${{ inputs.enable-qemu }}
+
+      - name: Build Docker image
+        id: build
+        uses: bridan234/PipelineTemplates/Docker/actions/build@main
+        with:
+          context: ${{ inputs.context }}
+          dockerfile: ${{ inputs.dockerfile }}
+          image-name: ${{ inputs.image-name }}
+          tags: ${{ inputs.tags }}
+          build-args: ${{ inputs.build-args }}
+          target: ${{ inputs.target }}
+          platforms: ${{ inputs.platforms }}
+          cache-from: ${{ inputs.enable-cache && 'type=gha' || '' }}
+          cache-to: ${{ inputs.enable-cache && 'type=gha,mode=max' || '' }}
+          load: ${{ inputs.platforms == 'linux/amd64' }}
+          push: 'false'
+          provenance: ${{ inputs.provenance }}
+          sbom: ${{ inputs.sbom }}
+
+  scan:
+    name: Security Scan
+    needs: build
+    if: inputs.enable-scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    outputs:
+      scan-completed: ${{ steps.scan.outputs.scan-completed }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Docker
+        uses: bridan234/PipelineTemplates/Docker/actions/setup@main
+        with:
+          registry: ${{ inputs.registry }}
+          registry-url: ${{ inputs.registry-url }}
+          username: ${{ secrets.registry-username }}
+          password: ${{ secrets.registry-password }}
+          buildx-install: 'false'
+
+      - name: Pull or rebuild image for scanning
+        run: |
+          # For single platform builds, the image should be in the local daemon
+          FIRST_TAG=$(echo "${{ inputs.tags }}" | cut -d',' -f1 | xargs)
+          IMAGE="${{ inputs.image-name }}:${FIRST_TAG}"
+          
+          if ! docker image inspect "$IMAGE" > /dev/null 2>&1; then
+            echo "Image not found locally, rebuilding..."
+            docker build -t "$IMAGE" \
+              -f "${{ inputs.dockerfile }}" \
+              ${{pipeline-templates/actionsmat('--target {0}', inputs.target) || '' }} \
+              "${{ inputs.context }}"
+          fi
+
+      - name: Scan Docker image
+        id: scan
+        uses: bridan234/PipelineTemplates/Docker/actions/scan@main
+        with:
+          image-name: ${{ inputs.image-name }}:$(echo "${{ inputs.tags }}" | cut -d',' -f1 | xargs)
+          scanner: ${{ inputs.scanner }}
+          severity: ${{ inputs.scan-severity }}
+          fail-on-severity: ${{ inputs.fail-on-severity }}
+          scan-type: 'vuln'
+          output-format: 'sarif'
+          output-file: ${{ inputs.scanner }}-results.sarif
+          upload-sarif: ${{ inputs.upload-sarif }}
+          snyk-token: ${{ secrets.snyk-token }}
+
+  push:
+    name: Push to Registry
+    needs: [build, scan]
+    if: |
+      always() &&
+      inputs.enable-push &&
+      needs.build.result == 'success' &&
+      (needs.scan.result == 'success' || needs.scan.result == 'skipped')
+    runs-on: ubuntu-latest
+    outputs:
+      pushed-tags: ${{ steps.push.outputs.pushed-tags }}
+      registry-url: ${{ steps.push.outputs.registry-url }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Docker
+        uses: bridan234/PipelineTemplates/Docker/actions/setup@main
+        with:
+          registry: ${{ inputs.registry }}
+          registry-url: ${{ inputs.registry-url }}
+          username: ${{ secrets.registry-username }}
+          password: ${{ secrets.registry-password }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Rebuild or pull image for push
+        run: |
+          FIRST_TAG=$(echo "${{ inputs.tags }}" | cut -d',' -f1 | xargs)
+          IMAGE="${{ inputs.image-name }}:${FIRST_TAG}"
+          
+          if ! docker image inspect "$IMAGE" > /dev/null 2>&1; then
+            echo "Image not found locally, rebuilding..."
+            docker build -t "$IMAGE" \
+              -f "${{ inputs.dockerfile }}" \
+              ${{pipeline-templates/actionsmat('--target {0}', inputs.target) || '' }} \
+              "${{ inputs.context }}"
+          fi
+
+      - name: Push Docker image
+        id: push
+        uses: bridan234/PipelineTemplates/Docker/actions/push@main
+        with:
+          image-name: ${{ inputs.image-name }}
+          tags: ${{ inputs.tags }}
+          resetup, gistry: ${{ inputs.registry }}
+          registry-url: ${{ inputs.registry-url }}
+          additional-tags: sha-${{ github.sha }}
+
+  summary:
+    name: Pipeline Summary
+    needs: [build, scan, push]
+    if: always()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Generate pipeline summary
+        run: |
+          echo "# 🐳 Docker Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Scan | ${{ needs.scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Push | ${{ needs.push.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Image Details" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** \`${{ inputs.image-name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tags:** \`${{ inputs.tags }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Registry:** \`${{ inputs.registry }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platforms:** \`${{ inputs.platforms }}\`" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ inputs.enable-push }}" == "true" ] && [ "${{ needs.push.result }}" == "success" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## 🎉 Successfully Published" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Registry URL:** \`${{ needs.push.outputs.registry-url }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
